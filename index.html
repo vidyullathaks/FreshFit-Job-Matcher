@@ -169,6 +169,7 @@
           <option value="Arbeitnow">Arbeitnow</option>
           <option value="Adzuna">Adzuna</option>
           <option value="LinkedIn">LinkedIn</option>
+          <option value="Career Pages">Career Pages</option>
         </select>
         <select id="filter-score" onchange="renderDashboard()"
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
@@ -296,6 +297,39 @@
             ⚠️ Apify credits exhausted — LinkedIn jobs paused until your monthly credits reset.
             <a href="https://console.apify.com/billing" target="_blank" class="underline ml-1">Check billing →</a>
           </p>
+        </div>
+
+        <!-- Career Pages -->
+        <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+          <h3 class="font-semibold text-lg mb-1">Company Career Pages
+            <span class="ml-2 text-xs font-normal text-slate-400">(uses your Apify token above)</span>
+          </h3>
+          <p class="text-sm text-slate-500 mb-4">
+            Scrapes job postings directly from company career pages via Google Jobs.
+            Add the companies you want to track.
+          </p>
+          <label class="block text-sm font-medium mb-1">Target Companies <span class="text-slate-400 font-normal">(comma-separated)</span></label>
+          <input id="s-target-companies" type="text"
+            placeholder="Google, Meta, Apple, Microsoft, Amazon…"
+            class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 mb-3" />
+          <!-- Quick-add popular companies -->
+          <p class="text-xs text-slate-400 mb-2">Quick-add:</p>
+          <div class="flex flex-wrap gap-2" id="company-badges">
+            <!-- Injected by JS -->
+          </div>
+          <div class="mt-3">
+            <label class="block text-sm font-medium mb-1">Country for Google Jobs</label>
+            <select id="s-career-country"
+              class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+              <option value="us">United States</option>
+              <option value="gb">United Kingdom</option>
+              <option value="ca">Canada</option>
+              <option value="au">Australia</option>
+              <option value="in">India</option>
+              <option value="de">Germany</option>
+              <option value="sg">Singapore</option>
+            </select>
+          </div>
         </div>
 
         <div class="flex items-center gap-4">
@@ -531,14 +565,22 @@
   };
 
   const DEFAULT_SETTINGS = {
-    groqApiKey:    '',
-    adzunaAppId:   '',
-    adzunaAppKey:  '',
-    adzunaCountry: 'us',
-    apifyApiKey:   '',
-    jobTitles:     'Software Engineer, Frontend Developer',
-    location:      'Remote',
+    groqApiKey:      '',
+    adzunaAppId:     '',
+    adzunaAppKey:    '',
+    adzunaCountry:   'us',
+    apifyApiKey:     '',
+    targetCompanies: '',
+    careerCountry:   'us',
+    jobTitles:       'Software Engineer, Frontend Developer',
+    location:        'Remote',
   };
+
+  const POPULAR_COMPANIES = [
+    'Google','Meta','Apple','Microsoft','Amazon','Netflix','Spotify',
+    'Airbnb','Uber','Stripe','Shopify','Atlassian','Salesforce','Adobe',
+    'Nvidia','OpenAI','Anthropic','Figma','Notion','Linear',
+  ];
 
   let APP = {
     resumes:         [],   // { id, name, text, sections[], createdAt, updatedAt }
@@ -798,8 +840,11 @@
 
   function populateSettingsForm() {
     const s = APP.settings;
-    document.getElementById('s-apify-key').value     = s.apifyApiKey   || '';
-    document.getElementById('s-groq-key').value      = s.groqApiKey    || '';
+    document.getElementById('s-apify-key').value        = s.apifyApiKey      || '';
+    document.getElementById('s-groq-key').value         = s.groqApiKey       || '';
+    document.getElementById('s-target-companies').value = s.targetCompanies  || '';
+    document.getElementById('s-career-country').value   = s.careerCountry    || 'us';
+    renderCompanyBadges();
     document.getElementById('s-adzuna-id').value     = s.adzunaAppId   || '';
     document.getElementById('s-adzuna-key').value    = s.adzunaAppKey  || '';
     document.getElementById('s-adzuna-country').value= s.adzunaCountry || 'us';
@@ -809,8 +854,10 @@
 
   function saveSettings() {
     APP.settings = {
-      apifyApiKey:   document.getElementById('s-apify-key').value.trim(),
-      groqApiKey:    document.getElementById('s-groq-key').value.trim(),
+      apifyApiKey:     document.getElementById('s-apify-key').value.trim(),
+      groqApiKey:      document.getElementById('s-groq-key').value.trim(),
+      targetCompanies: document.getElementById('s-target-companies').value.trim(),
+      careerCountry:   document.getElementById('s-career-country').value,
       adzunaAppId:   document.getElementById('s-adzuna-id').value.trim(),
       adzunaAppKey:  document.getElementById('s-adzuna-key').value.trim(),
       adzunaCountry: document.getElementById('s-adzuna-country').value,
@@ -892,6 +939,59 @@
           source: 'Arbeitnow', tags: j.tags || [],
         }));
     } catch(e) { console.warn('Arbeitnow:', e.message); return []; }
+  }
+
+  /* ── Company badge quick-add ── */
+  function renderCompanyBadges() {
+    const input     = document.getElementById('s-target-companies');
+    const container = document.getElementById('company-badges');
+    if (!container) return;
+    const current = (input.value || '').split(',').map(s => s.trim().toLowerCase());
+
+    container.innerHTML = POPULAR_COMPANIES.map(co => {
+      const active = current.includes(co.toLowerCase());
+      return `<button type="button"
+        onclick="toggleCompanyBadge('${co}')"
+        class="text-xs px-3 py-1 rounded-full border transition-colors ${
+          active
+            ? 'bg-teal-500 text-white border-teal-500'
+            : 'bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-600'
+        }">
+        ${co}
+      </button>`;
+    }).join('');
+  }
+
+  function toggleCompanyBadge(company) {
+    const input   = document.getElementById('s-target-companies');
+    const current = input.value.split(',').map(s => s.trim()).filter(Boolean);
+    const idx     = current.findIndex(c => c.toLowerCase() === company.toLowerCase());
+    if (idx === -1) current.push(company);
+    else            current.splice(idx, 1);
+    input.value = current.join(', ');
+    renderCompanyBadges();
+  }
+
+  /* ── Parse relative dates returned by Google Jobs ── */
+  function parseRelativeDate(str) {
+    if (!str) return null;
+    const s = str.toLowerCase().trim();
+    // Already ISO
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return new Date(s);
+    const now = Date.now();
+    const m = s.match(/(\d+)\s*(minute|hour|day|week|month)/);
+    if (!m) return null;
+    const n = parseInt(m[1]);
+    const unit = m[2];
+    const map = { minute: 60000, hour: 3600000, day: 86400000, week: 604800000, month: 2592000000 };
+    return new Date(now - n * (map[unit] || 0));
+  }
+
+  function isWithin12hRelative(dateStr) {
+    const d = parseRelativeDate(dateStr);
+    if (!d) return true; // include if unparseable
+    const h = (Date.now() - d.getTime()) / 3_600_000;
+    return h >= 0 && h <= 12;
   }
 
   /* ── Apify / LinkedIn ── */
@@ -1003,6 +1103,99 @@
       }));
   }
 
+  /* ── Apify / Company Career Pages (Google Jobs scraper) ── */
+  const GOOGLE_JOBS_ACTOR = 'apify~google-jobs-scraper';
+
+  async function fetchApifyCareerPages() {
+    const token     = APP.settings.apifyApiKey;
+    const companies = (APP.settings.targetCompanies || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    if (!token || companies.length === 0) return [];
+
+    const titles = (APP.settings.jobTitles || 'software engineer')
+      .split(',').map(t => t.trim()).filter(Boolean);
+
+    // Build cross-product: one query per (title × company), capped to avoid burning credits
+    const queries = [];
+    for (const title of titles.slice(0, 2)) {
+      for (const company of companies.slice(0, 6)) {
+        queries.push(`${title} at ${company}`);
+      }
+    }
+
+    const syncUrl =
+      `https://api.apify.com/v2/acts/${GOOGLE_JOBS_ACTOR}/run-sync-get-dataset-items` +
+      `?token=${encodeURIComponent(token)}&timeout=120&memory=256`;
+
+    let res;
+    try {
+      res = await fetch(syncUrl, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          queries,
+          countryCode:      APP.settings.careerCountry || 'us',
+          languageCode:     'en',
+          maxPagesPerQuery: 1,
+          datePosted:       'today',       // Google Jobs filter; we re-filter to 12h below
+        }),
+      });
+    } catch (netErr) {
+      console.warn('Apify (Career Pages) network error:', netErr.message);
+      showToast('Career pages (Apify): network error — skipped.', 4000);
+      return [];
+    }
+
+    // ── Shared credit/auth error handling ──
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 402) {
+        document.getElementById('apify-credit-warning')?.classList.remove('hidden');
+        showToast(APIFY_ERRORS[402], 6000);
+        return [];
+      }
+      if (res.status === 401) { showToast(APIFY_ERRORS[401], 5000); return []; }
+      if (res.status === 429) { showToast(APIFY_ERRORS[429], 5000); return []; }
+      const msg = body?.error?.message || '';
+      if (res.status === 408 || msg.toLowerCase().includes('timeout')) {
+        showToast(APIFY_ERRORS.timeout, 5000);
+      } else {
+        showToast(`Career pages (Apify): error ${res.status} — skipped.`, 5000);
+      }
+      console.warn('Apify (Career Pages) error:', res.status, body);
+      return [];
+    }
+
+    let data;
+    try { data = await res.json(); } catch { return []; }
+    if (!Array.isArray(data)) return [];
+
+    return data
+      .filter(j => j && j.title)
+      .filter(j => isWithin12hRelative(j.date || j.postedAt || ''))
+      .map(j => {
+        // Extract the direct apply URL from relatedLinks if available
+        const applyLink = (j.relatedLinks || []).find(l =>
+          /apply|career|job/i.test(l.text || '')
+        )?.link || j.shareLink || '';
+
+        return mkJob({
+          id:          'cp_' + (j.jobId || Math.random().toString(36).slice(2)),
+          title:       j.title,
+          company:     j.companyName || j.company || '',
+          location:    j.location    || '',
+          url:         applyLink     || j.shareLink || '',
+          salary:      j.salary      || j.salaryRange || '',
+          description: stripHtml(j.description || (j.jobHighlights || []).map(h =>
+            [h.title, ...(h.items || [])].join('\n')).join('\n\n')),
+          postedAt:    parseRelativeDate(j.date || j.postedAt || '')?.toISOString()
+                       || new Date().toISOString(),
+          source:      'Career Pages',
+          tags:        [],
+        });
+      });
+  }
+
   /* ── Adzuna (optional) ── */
   async function fetchAdzuna() {
     const { adzunaAppId: appId, adzunaAppKey: appKey, adzunaCountry: cc,
@@ -1050,14 +1243,16 @@
     showToast('Searching fresh jobs from the last 12 hours…', 4000);
 
     try {
-      const [r1, r2, r3, r4] = await Promise.allSettled([
-        fetchRemoteOK(), fetchArbeitnow(), fetchAdzuna(), fetchApifyLinkedIn()
+      const [r1, r2, r3, r4, r5] = await Promise.allSettled([
+        fetchRemoteOK(), fetchArbeitnow(), fetchAdzuna(),
+        fetchApifyLinkedIn(), fetchApifyCareerPages()
       ]);
       const all = [
         ...(r1.status==='fulfilled' ? r1.value : []),
         ...(r2.status==='fulfilled' ? r2.value : []),
         ...(r3.status==='fulfilled' ? r3.value : []),
         ...(r4.status==='fulfilled' ? r4.value : []),
+        ...(r5.status==='fulfilled' ? r5.value : []),
       ];
       // Deduplicate by URL
       const seen = new Set();
