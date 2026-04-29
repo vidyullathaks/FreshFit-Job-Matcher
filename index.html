@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FreshFit — AI Job Matcher</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 400: '#2dd4bf', 500: '#14b8a6', 600: '#0d9488' }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <style>
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+
+    /* ── Nav active state ── */
+    .nav-btn { color: #94a3b8; }
+    .nav-btn:hover { color: #ffffff; background: #334155; }
+    .nav-btn.active { color: #ffffff; background: #0f766e; }
+
+    /* ── Spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 0.8s linear infinite; }
+
+    /* ── Card fade-in ── */
+    @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    .fade-up { animation: fadeUp 0.25s ease forwards; }
+
+    /* ── Score ring colours ── */
+    .score-strong  { color: #15803d; background: #f0fdf4; border-color: #bbf7d0; }
+    .score-moderate{ color: #b45309; background: #fffbeb; border-color: #fde68a; }
+    .score-low     { color: #475569; background: #f8fafc; border-color: #e2e8f0; }
+
+    /* ── Modal visible ── */
+    #modal-backdrop.open { display: flex; }
+
+    /* ── Toast ── */
+    #toast-inner.show { opacity: 1; }
+
+    /* ══════════════════════════════════════
+       PRINT STYLES
+       Only #print-content visible when printing
+    ══════════════════════════════════════ */
+    @media print {
+      /* Hide everything except print overlay */
+      body > *:not(#print-overlay) { display: none !important; }
+      #print-overlay {
+        display: block !important;
+        position: static !important;
+        background: white !important;
+        overflow: visible !important;
+      }
+      #print-content { padding: 0 !important; margin: 0 auto !important; }
+      .no-print { display: none !important; }
+
+      @page {
+        size: letter portrait;
+        margin: 0.55in 0.65in;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+  <!-- ═══════════════════════════════════════════
+       HEADER / NAV
+  ═══════════════════════════════════════════ -->
+  <header id="app-header" class="bg-slate-900 text-white sticky top-0 z-40 shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+      <!-- Logo -->
+      <div class="flex items-center gap-3 shrink-0">
+        <div class="w-9 h-9 bg-teal-500 rounded-lg flex items-center justify-center font-bold text-lg select-none">F</div>
+        <div class="leading-tight">
+          <div class="font-bold text-base">FreshFit</div>
+          <div class="text-xs text-slate-400">AI Job Matcher</div>
+        </div>
+      </div>
+      <!-- Nav -->
+      <nav class="hidden md:flex items-center gap-1">
+        <button id="nav-dashboard" onclick="showView('dashboard')" class="nav-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">Jobs</button>
+        <button id="nav-resumes"   onclick="showView('resumes')"   class="nav-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">Resumes</button>
+        <button id="nav-settings"  onclick="showView('settings')"  class="nav-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">Settings</button>
+      </nav>
+      <!-- Right controls -->
+      <div class="flex items-center gap-3">
+        <span id="last-updated" class="text-xs text-slate-400 hidden md:block"></span>
+        <button id="btn-fetch" onclick="fetchJobs()"
+          class="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <svg id="fetch-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Find Jobs
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════
+       MAIN — VIEW CONTAINERS
+  ═══════════════════════════════════════════ -->
+  <main class="max-w-7xl mx-auto px-4 py-6">
+
+    <!-- ── SETUP VIEW (no resumes yet) ── -->
+    <div id="view-setup" class="hidden">
+      <div class="max-w-2xl mx-auto mt-12 text-center">
+        <div class="w-20 h-20 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <svg class="w-10 h-10 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+        </div>
+        <h2 class="text-3xl font-bold text-slate-900 mb-3">Welcome to FreshFit</h2>
+        <p class="text-slate-500 text-lg mb-8">
+          Upload your resume once. Get matched to fresh job postings (last 12 hours) with AI-tailored resumes that pass ATS scans.
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10 text-left">
+          <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+            <div class="text-2xl mb-2">📄</div>
+            <h3 class="font-semibold mb-1">Upload Resume</h3>
+            <p class="text-sm text-slate-500">PDF or TXT. Add multiple resumes for different roles.</p>
+          </div>
+          <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+            <div class="text-2xl mb-2">🎯</div>
+            <h3 class="font-semibold mb-1">Get Matched</h3>
+            <p class="text-sm text-slate-500">AI scores every fresh job for fit and recommends the best resume.</p>
+          </div>
+          <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+            <div class="text-2xl mb-2">✨</div>
+            <h3 class="font-semibold mb-1">Tailor &amp; Apply</h3>
+            <p class="text-sm text-slate-500">AI rewrites your resume in your format — 1 page, ATS-ready.</p>
+          </div>
+        </div>
+        <button onclick="openAddResumeModal()"
+          class="inline-flex items-center gap-2 bg-teal-500 hover:bg-teal-600 text-white font-semibold px-8 py-3 rounded-xl text-lg transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          Upload Your Resume
+        </button>
+        <p class="text-sm text-slate-400 mt-4">Free Groq API key needed for AI features — add it in Settings after uploading.</p>
+      </div>
+    </div>
+
+    <!-- ── DASHBOARD VIEW ── -->
+    <div id="view-dashboard" class="hidden">
+      <!-- Filter bar -->
+      <div class="flex flex-wrap items-center gap-3 mb-6">
+        <input id="filter-keywords" type="text" placeholder="Filter by keyword…"
+          oninput="renderDashboard()"
+          class="flex-1 min-w-48 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white" />
+        <select id="filter-source" onchange="renderDashboard()"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+          <option value="">All Sources</option>
+          <option value="RemoteOK">RemoteOK</option>
+          <option value="Arbeitnow">Arbeitnow</option>
+          <option value="Adzuna">Adzuna</option>
+        </select>
+        <select id="filter-score" onchange="renderDashboard()"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+          <option value="0">Any Fit Score</option>
+          <option value="70">Strong Fit (70%+)</option>
+          <option value="50">Moderate Fit (50%+)</option>
+        </select>
+        <span id="job-count" class="text-sm text-slate-500 shrink-0"></span>
+      </div>
+      <!-- Jobs grid -->
+      <div id="jobs-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      <!-- Empty state -->
+      <div id="jobs-empty" class="hidden text-center py-20">
+        <div class="text-6xl mb-4">🔍</div>
+        <h3 class="text-xl font-semibold text-slate-700 mb-2">No jobs found yet</h3>
+        <p class="text-slate-500 mb-6">Click "Find Jobs" to pull fresh postings from the last 12 hours.</p>
+        <button onclick="fetchJobs()"
+          class="bg-teal-500 hover:bg-teal-600 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
+          Find Fresh Jobs
+        </button>
+      </div>
+    </div>
+
+    <!-- ── RESUMES VIEW ── -->
+    <div id="view-resumes" class="hidden">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-2xl font-bold">My Resumes</h2>
+        <button onclick="openAddResumeModal()"
+          class="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 text-white font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          Add Resume
+        </button>
+      </div>
+      <div id="resumes-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+    </div>
+
+    <!-- ── SETTINGS VIEW ── -->
+    <div id="view-settings" class="hidden">
+      <div class="max-w-2xl space-y-6">
+        <h2 class="text-2xl font-bold">Settings</h2>
+
+        <!-- Groq -->
+        <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+          <h3 class="font-semibold text-lg mb-1">AI Resume Tailoring — Groq</h3>
+          <p class="text-sm text-slate-500 mb-4">
+            Free key at <a href="https://console.groq.com" target="_blank" class="text-teal-600 hover:underline">console.groq.com</a> — no credit card needed.
+          </p>
+          <label class="block text-sm font-medium mb-1">Groq API Key</label>
+          <div class="flex gap-2">
+            <input id="s-groq-key" type="password" placeholder="gsk_…"
+              class="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            <button onclick="toggleGroqKey()" class="text-xs border border-slate-200 px-3 rounded-lg hover:bg-slate-50 text-slate-500">Show</button>
+          </div>
+        </div>
+
+        <!-- Job preferences -->
+        <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+          <h3 class="font-semibold text-lg mb-4">Job Search Preferences</h3>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">Job Titles / Keywords <span class="text-slate-400 font-normal">(comma-separated)</span></label>
+              <input id="s-job-titles" type="text" placeholder="Software Engineer, Frontend Developer, React Developer"
+                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Preferred Location</label>
+              <input id="s-location" type="text" placeholder="Remote, New York, London…"
+                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Adzuna optional -->
+        <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+          <h3 class="font-semibold text-lg mb-1">Adzuna <span class="text-slate-400 font-normal text-sm">(optional — adds salary data)</span></h3>
+          <p class="text-sm text-slate-500 mb-4">
+            Free at <a href="https://developer.adzuna.com" target="_blank" class="text-teal-600 hover:underline">developer.adzuna.com</a> — 100 calls/day.
+          </p>
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label class="block text-sm font-medium mb-1">App ID</label>
+              <input id="s-adzuna-id" type="text" placeholder="your_app_id"
+                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">App Key</label>
+              <input id="s-adzuna-key" type="password" placeholder="your_app_key"
+                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Country</label>
+            <select id="s-adzuna-country"
+              class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+              <option value="us">United States</option>
+              <option value="gb">United Kingdom</option>
+              <option value="ca">Canada</option>
+              <option value="au">Australia</option>
+              <option value="de">Germany</option>
+              <option value="in">India</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <button onclick="saveSettings()"
+            class="bg-teal-500 hover:bg-teal-600 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors">
+            Save Settings
+          </button>
+          <span id="settings-saved" class="text-teal-600 text-sm hidden">✓ Saved!</span>
+        </div>
+      </div>
+    </div>
+
+  </main><!-- end main -->
+
+  <!-- ═══════════════════════════════════════════
+       MODAL BACKDROP + MODALS
+  ═══════════════════════════════════════════ -->
+  <div id="modal-backdrop"
+    class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden items-center justify-center p-4"
+    onclick="handleBackdropClick(event)">
+
+    <!-- ── RESUME UPLOAD MODAL ── -->
+    <div id="modal-resume" class="hidden bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+      <div class="flex items-center justify-between p-6 border-b border-slate-100">
+        <h2 class="text-xl font-bold" id="modal-resume-title">Add Resume</h2>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 transition-colors">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Resume Label</label>
+          <input id="resume-name" type="text" placeholder="e.g. Senior SWE Resume, Product Manager CV"
+            class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+        </div>
+        <!-- Drop zone -->
+        <div id="upload-area"
+          class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-teal-400 hover:bg-teal-50/50 transition-colors"
+          onclick="document.getElementById('file-input').click()"
+          ondragover="handleDragOver(event)" ondrop="handleDrop(event)">
+          <svg class="w-10 h-10 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+          <p class="font-medium text-slate-600">Drop file here or click to upload</p>
+          <p class="text-sm text-slate-400 mt-1">PDF or TXT</p>
+          <input id="file-input" type="file" accept=".pdf,.txt" class="hidden" onchange="handleFileUpload(event)" />
+        </div>
+        <!-- Divider -->
+        <div class="relative flex items-center">
+          <div class="flex-1 border-t border-slate-200"></div>
+          <span class="px-3 text-xs text-slate-400 bg-white">OR PASTE TEXT</span>
+          <div class="flex-1 border-t border-slate-200"></div>
+        </div>
+        <textarea id="resume-text" rows="8" placeholder="Paste your resume text here…"
+          class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none font-mono leading-relaxed"></textarea>
+        <div id="upload-status" class="text-sm hidden"></div>
+      </div>
+      <div class="flex gap-3 p-6 pt-0">
+        <button onclick="closeModal()"
+          class="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-lg hover:bg-slate-50 transition-colors">
+          Cancel
+        </button>
+        <button onclick="saveResume()"
+          class="flex-1 bg-teal-500 hover:bg-teal-600 text-white font-medium py-2.5 rounded-lg transition-colors">
+          Save Resume
+        </button>
+      </div>
+    </div>
+
+    <!-- ── JOB DETAIL MODAL ── -->
+    <div id="modal-job" class="hidden bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col">
+      <div class="flex items-start justify-between p-6 border-b border-slate-100 shrink-0 gap-4">
+        <div class="flex-1 min-w-0">
+          <h2 id="jd-title" class="text-xl font-bold leading-tight"></h2>
+          <p id="jd-company" class="text-slate-500 text-sm mt-1"></p>
+        </div>
+        <button onclick="closeModal()" class="shrink-0 text-slate-400 hover:text-slate-600 transition-colors mt-1">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="overflow-y-auto flex-1 p-6 space-y-4">
+        <!-- Meta row -->
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <span id="jd-location" class="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full text-xs"></span>
+          <span id="jd-source"   class="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full text-xs"></span>
+          <span id="jd-posted"   class="text-slate-400 text-xs"></span>
+        </div>
+        <!-- Score / salary / resume -->
+        <div class="flex flex-wrap gap-3">
+          <div id="jd-salary" class="hidden bg-green-50 border border-green-200 text-green-700 text-sm font-medium px-3 py-1.5 rounded-lg"></div>
+          <div id="jd-score"  class="bg-teal-50 border border-teal-200 text-teal-700 text-sm font-medium px-3 py-1.5 rounded-lg"></div>
+          <div id="jd-resume-rec" class="bg-blue-50 border border-blue-200 text-blue-700 text-sm font-medium px-3 py-1.5 rounded-lg"></div>
+        </div>
+        <!-- Description -->
+        <div>
+          <h3 class="font-semibold text-slate-700 mb-2">Job Description</h3>
+          <div id="jd-description"
+            class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-4 max-h-72 overflow-y-auto border border-slate-100"></div>
+        </div>
+      </div>
+      <div class="flex gap-3 p-6 pt-0 border-t border-slate-100 shrink-0">
+        <a id="jd-apply-btn" href="#" target="_blank"
+          class="flex-1 bg-slate-900 hover:bg-slate-700 text-white font-medium py-2.5 rounded-lg transition-colors text-center text-sm">
+          Apply Now ↗
+        </a>
+        <button id="jd-tailor-btn" onclick="openTailorModal()"
+          class="flex-1 bg-teal-500 hover:bg-teal-600 text-white font-medium py-2.5 rounded-lg transition-colors text-sm flex items-center justify-center gap-2">
+          ✨ Tailor Resume with AI
+        </button>
+      </div>
+    </div>
+
+    <!-- ── TAILOR MODAL ── -->
+    <div id="modal-tailor" class="hidden bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
+        <div>
+          <h2 class="text-xl font-bold">Tailored Resume</h2>
+          <p class="text-xs text-slate-400 mt-0.5">ATS-optimised · Same format as original · 1 page</p>
+        </div>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 transition-colors">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Loading -->
+      <div id="tailor-loading" class="hidden flex-1 flex flex-col items-center justify-center p-12 gap-4">
+        <div class="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+        <div class="text-center">
+          <p class="font-semibold text-slate-700">Tailoring your resume with AI…</p>
+          <p class="text-sm text-slate-400 mt-1">Analysing job description &amp; optimising for ATS</p>
+        </div>
+      </div>
+
+      <!-- Result -->
+      <div id="tailor-result" class="hidden flex-1 flex flex-col overflow-hidden">
+        <!-- Resume selector (shown if multiple resumes) -->
+        <div id="tailor-selector-wrap" class="hidden px-6 pt-4">
+          <label class="block text-sm font-medium mb-1">Base resume:</label>
+          <select id="tailor-resume-select"
+            class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+            onchange="retailor()">
+          </select>
+        </div>
+        <div class="overflow-y-auto flex-1 p-6">
+          <div id="tailor-output"
+            class="font-mono text-sm leading-relaxed whitespace-pre-wrap bg-slate-50 border border-slate-100 rounded-xl p-5 min-h-64"></div>
+          <p class="text-xs text-slate-400 mt-3">
+            💡 <strong>To save as PDF:</strong> Click "Download as PDF" → browser print dialog → choose "Save as PDF" → Portrait, 0.5" margins.
+          </p>
+        </div>
+        <div class="flex gap-3 p-6 pt-0 border-t border-slate-100 shrink-0">
+          <button onclick="copyTailored()"
+            class="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-lg hover:bg-slate-50 transition-colors text-sm flex items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+            </svg>
+            Copy Text
+          </button>
+          <button onclick="downloadTailored()"
+            class="flex-1 bg-teal-500 hover:bg-teal-600 text-white font-medium py-2.5 rounded-lg transition-colors text-sm flex items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Download as PDF
+          </button>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div id="tailor-error" class="hidden flex-1 flex flex-col items-center justify-center p-12 gap-3 text-center">
+        <div class="text-5xl">⚠️</div>
+        <p id="tailor-error-msg" class="font-semibold text-slate-700 text-lg"></p>
+        <p class="text-sm text-slate-500">Make sure your Groq API key is set in Settings.</p>
+        <button onclick="openTailorModal()"
+          class="mt-2 bg-teal-500 hover:bg-teal-600 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors">
+          Try Again
+        </button>
+      </div>
+    </div>
+
+  </div><!-- end modal-backdrop -->
+
+  <!-- ═══════════════════════════════════════════
+       PRINT OVERLAY (only shown during PDF export)
+  ═══════════════════════════════════════════ -->
+  <div id="print-overlay" class="hidden fixed inset-0 bg-white z-[9999] overflow-auto">
+    <div class="no-print fixed top-4 right-4 flex gap-2 z-10">
+      <button onclick="triggerPrint()"
+        class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-md transition-colors">
+        🖨️ Print / Save as PDF
+      </button>
+      <button onclick="closePrintOverlay()"
+        class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold shadow-md transition-colors">
+        ✕ Close
+      </button>
+    </div>
+    <div id="print-content" class="max-w-[7.5in] mx-auto py-12 px-0"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       TOAST NOTIFICATION
+  ═══════════════════════════════════════════ -->
+  <div id="toast" class="fixed bottom-6 right-6 z-[9998] pointer-events-none">
+    <div id="toast-inner"
+      class="bg-slate-900 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-2xl max-w-xs opacity-0 transition-opacity duration-300">
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       SCRIPTS — Tasks 2-13 will be added here
+  ═══════════════════════════════════════════ -->
+  <script>
+  // ═══════════════════════════════════════════════════
+  // TASK 3 — STATE + LOCALSTORAGE
+  // ═══════════════════════════════════════════════════
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const SK = {
+    RESUMES:    'ff_resumes',
+    SETTINGS:   'ff_settings',
+    JOBS:       'ff_jobs',
+    LAST_FETCH: 'ff_last_fetch',
+  };
+
+  const DEFAULT_SETTINGS = {
+    groqApiKey:    '',
+    adzunaAppId:   '',
+    adzunaAppKey:  '',
+    adzunaCountry: 'us',
+    jobTitles:     'Software Engineer, Frontend Developer',
+    location:      'Remote',
+  };
+
+  let APP = {
+    resumes:         [],   // { id, name, text, sections[], createdAt, updatedAt }
+    jobs:            [],   // normalised job objects
+    settings:        { ...DEFAULT_SETTINGS },
+    // ui
+    currentView:     'dashboard',
+    selectedJobId:   null,
+    tailorJobId:     null,
+    tailorResumeId:  null,
+    tailoredText:    '',
+    editingResumeId: null,
+  };
+
+  /* ── Persist ── */
+  function persistResumes()  { localStorage.setItem(SK.RESUMES,    JSON.stringify(APP.resumes));   }
+  function persistSettings() { localStorage.setItem(SK.SETTINGS,   JSON.stringify(APP.settings));  }
+  function persistJobs()     {
+    localStorage.setItem(SK.JOBS,       JSON.stringify(APP.jobs));
+    const now = new Date().toISOString();
+    localStorage.setItem(SK.LAST_FETCH, now);
+    setLastUpdated(now);
+  }
+
+  /* ── Load ── */
+  function loadPersistedState() {
+    try {
+      const r = localStorage.getItem(SK.RESUMES);
+      if (r) APP.resumes = JSON.parse(r);
+
+      const s = localStorage.getItem(SK.SETTINGS);
+      if (s) APP.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(s) };
+
+      const j = localStorage.getItem(SK.JOBS);
+      if (j) APP.jobs = JSON.parse(j);
+
+      const lf = localStorage.getItem(SK.LAST_FETCH);
+      if (lf) setLastUpdated(lf);
+    } catch (e) { console.warn('State load error:', e); }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 4 — PDF PARSING + SECTION DETECTION
+  // ═══════════════════════════════════════════════════
+
+  async function parsePDF(file) {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let text = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page    = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      // Preserve approximate line breaks using y-position
+      let lastY = null;
+      content.items.forEach(item => {
+        if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) text += '\n';
+        text += item.str;
+        lastY = item.transform[5];
+      });
+      text += '\n';
+    }
+    return text.trim();
+  }
+
+  const SECTION_PATTERNS = [
+    /^(SUMMARY|PROFESSIONAL SUMMARY|OBJECTIVE|CAREER OBJECTIVE|PROFILE|ABOUT ME|OVERVIEW)/i,
+    /^(EXPERIENCE|WORK EXPERIENCE|PROFESSIONAL EXPERIENCE|EMPLOYMENT HISTORY|WORK HISTORY|EMPLOYMENT)/i,
+    /^(EDUCATION|ACADEMIC|QUALIFICATIONS|ACADEMIC BACKGROUND)/i,
+    /^(SKILLS|TECHNICAL SKILLS|CORE COMPETENCIES|KEY SKILLS|TECHNOLOGIES|TECH STACK|EXPERTISE)/i,
+    /^(PROJECTS|PERSONAL PROJECTS|KEY PROJECTS|NOTABLE PROJECTS|PORTFOLIO)/i,
+    /^(CERTIFICATIONS?|CERTIFICATES?|LICENSES?|ACCREDITATIONS?)/i,
+    /^(PUBLICATIONS?|RESEARCH|PAPERS?)/i,
+    /^(AWARDS?|HONOURS?|HONORS?|ACHIEVEMENTS?|RECOGNITION)/i,
+    /^(VOLUNTEER|VOLUNTEERING|COMMUNITY|SOCIAL)/i,
+    /^(LANGUAGES?)/i,
+    /^(INTERESTS?|HOBBIES|ACTIVITIES)/i,
+    /^(REFERENCES?)/i,
+    /^(LEADERSHIP|MANAGEMENT|MENTORING)/i,
+  ];
+
+  function detectSections(text) {
+    const found = [];
+    text.split('\n').forEach(raw => {
+      const line = raw.trim();
+      if (!line || line.length > 55) return;
+      if (SECTION_PATTERNS.some(p => p.test(line))) found.push(line);
+    });
+    return [...new Set(found)];
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 5 — RESUME MANAGEMENT
+  // ═══════════════════════════════════════════════════
+
+  function openAddResumeModal() {
+    APP.editingResumeId = null;
+    document.getElementById('modal-resume-title').textContent = 'Add Resume';
+    document.getElementById('resume-name').value  = '';
+    document.getElementById('resume-text').value  = '';
+    document.getElementById('file-input').value   = '';
+    const st = document.getElementById('upload-status');
+    st.classList.add('hidden'); st.textContent = '';
+    const ua = document.getElementById('upload-area');
+    ua.classList.remove('border-teal-400','bg-teal-50/50');
+    openModal('modal-resume');
+  }
+
+  function editResume(id) {
+    const r = APP.resumes.find(r => r.id === id);
+    if (!r) return;
+    APP.editingResumeId = id;
+    document.getElementById('modal-resume-title').textContent = 'Edit Resume';
+    document.getElementById('resume-name').value = r.name;
+    document.getElementById('resume-text').value = r.text;
+    document.getElementById('file-input').value  = '';
+    const st = document.getElementById('upload-status');
+    st.classList.add('hidden');
+    openModal('modal-resume');
+  }
+
+  function deleteResume(id) {
+    if (!confirm('Delete this resume? This cannot be undone.')) return;
+    APP.resumes = APP.resumes.filter(r => r.id !== id);
+    persistResumes();
+    renderResumesView();
+    if (APP.resumes.length === 0) showView('setup');
+    showToast('Resume deleted.');
+  }
+
+  function saveResume() {
+    const name = document.getElementById('resume-name').value.trim();
+    const text = document.getElementById('resume-text').value.trim();
+    if (!name) { showToast('Give this resume a name first.'); return; }
+    if (!text) { showToast('Resume text is empty — upload a file or paste text.'); return; }
+
+    const sections = detectSections(text);
+    const now = new Date().toISOString();
+
+    if (APP.editingResumeId) {
+      const idx = APP.resumes.findIndex(r => r.id === APP.editingResumeId);
+      if (idx !== -1) APP.resumes[idx] = { ...APP.resumes[idx], name, text, sections, updatedAt: now };
+      APP.editingResumeId = null;
+    } else {
+      APP.resumes.push({ id: 'r_' + Date.now(), name, text, sections, createdAt: now, updatedAt: now });
+    }
+
+    persistResumes();
+    closeModal();
+
+    if (APP.resumes.length === 1) {
+      // First resume — kick off a job fetch right away
+      showView('dashboard');
+      fetchJobs();
+    } else {
+      renderResumesView();
+      showToast('Resume saved!');
+    }
+  }
+
+  /* ── File upload handlers ── */
+  async function handleFileUpload(e) {
+    const file = e.target.files[0];
+    if (file) await processUploadedFile(file);
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    document.getElementById('upload-area').classList.add('border-teal-400','bg-teal-50/50');
+  }
+
+  async function handleDrop(e) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) await processUploadedFile(file);
+  }
+
+  async function processUploadedFile(file) {
+    const st = document.getElementById('upload-status');
+    st.textContent = 'Parsing…';
+    st.className = 'text-sm text-slate-500';
+    st.classList.remove('hidden');
+    try {
+      let text = '';
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+        text = await parsePDF(file);
+      } else {
+        text = await file.text();
+      }
+      document.getElementById('resume-text').value = text;
+      if (!document.getElementById('resume-name').value.trim()) {
+        document.getElementById('resume-name').value =
+          file.name.replace(/\.(pdf|txt|doc|docx)$/i, '').replace(/[-_]/g, ' ');
+      }
+      const lineCount = text.split('\n').filter(l => l.trim()).length;
+      st.textContent = `✓ Parsed ${lineCount} lines from "${file.name}"`;
+      st.className = 'text-sm text-teal-600';
+      document.getElementById('upload-area').classList.add('border-teal-400','bg-teal-50/50');
+    } catch (err) {
+      st.textContent = 'Could not parse the file. Try pasting the text directly.';
+      st.className = 'text-sm text-red-500';
+    }
+  }
+
+  /* ── Render resumes view ── */
+  function renderResumesView() {
+    const list = document.getElementById('resumes-list');
+    if (!list) return;
+    if (APP.resumes.length === 0) {
+      list.innerHTML = `
+        <div class="col-span-2 text-center py-16">
+          <p class="text-slate-500 mb-4">No resumes yet.</p>
+          <button onclick="openAddResumeModal()"
+            class="bg-teal-500 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-teal-600 transition-colors">
+            Add Resume
+          </button>
+        </div>`;
+      return;
+    }
+    list.innerHTML = APP.resumes.map(r => {
+      const lines = r.text.split('\n').filter(l => l.trim()).length;
+      const secs  = (r.sections || []).length;
+      const secBadges = (r.sections || []).map(s =>
+        `<span class="text-xs bg-teal-50 text-teal-700 border border-teal-100 px-2 py-0.5 rounded-full">${esc(s)}</span>`
+      ).join('');
+      return `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col gap-3 fade-up">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h3 class="font-semibold text-slate-900">${esc(r.name)}</h3>
+              <p class="text-xs text-slate-400 mt-0.5">
+                ${lines} lines · ${secs} section${secs !== 1 ? 's' : ''} detected ·
+                Updated ${new Date(r.updatedAt).toLocaleDateString()}
+              </p>
+            </div>
+            <div class="flex gap-2 shrink-0">
+              <button onclick="editResume('${r.id}')"
+                class="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:border-teal-300 hover:text-teal-600 transition-colors">
+                Edit
+              </button>
+              <button onclick="deleteResume('${r.id}')"
+                class="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:border-red-300 hover:text-red-500 transition-colors">
+                Delete
+              </button>
+            </div>
+          </div>
+          ${secBadges ? `<div class="flex flex-wrap gap-1">${secBadges}</div>` : ''}
+          <div class="text-xs text-slate-400 bg-slate-50 rounded-lg p-3 font-mono leading-relaxed line-clamp-3">
+            ${esc(r.text.slice(0, 220))}…
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 6 — SETTINGS UI
+  // ═══════════════════════════════════════════════════
+
+  function populateSettingsForm() {
+    const s = APP.settings;
+    document.getElementById('s-groq-key').value      = s.groqApiKey    || '';
+    document.getElementById('s-adzuna-id').value     = s.adzunaAppId   || '';
+    document.getElementById('s-adzuna-key').value    = s.adzunaAppKey  || '';
+    document.getElementById('s-adzuna-country').value= s.adzunaCountry || 'us';
+    document.getElementById('s-job-titles').value    = s.jobTitles     || '';
+    document.getElementById('s-location').value      = s.location      || '';
+  }
+
+  function saveSettings() {
+    APP.settings = {
+      groqApiKey:    document.getElementById('s-groq-key').value.trim(),
+      adzunaAppId:   document.getElementById('s-adzuna-id').value.trim(),
+      adzunaAppKey:  document.getElementById('s-adzuna-key').value.trim(),
+      adzunaCountry: document.getElementById('s-adzuna-country').value,
+      jobTitles:     document.getElementById('s-job-titles').value.trim(),
+      location:      document.getElementById('s-location').value.trim(),
+    };
+    persistSettings();
+    const saved = document.getElementById('settings-saved');
+    saved.classList.remove('hidden');
+    setTimeout(() => saved.classList.add('hidden'), 2500);
+    showToast('Settings saved!');
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 7 — JOB FETCHING
+  // ═══════════════════════════════════════════════════
+
+  const PROXY = 'https://api.allorigins.win/raw?url=';
+
+  function isWithin12h(raw) {
+    if (!raw) return false;
+    const d = typeof raw === 'number' ? new Date(raw * 1000) : new Date(raw);
+    if (isNaN(d.getTime())) return false;
+    const h = (Date.now() - d.getTime()) / 3_600_000;
+    return h >= 0 && h <= 12;
+  }
+
+  function mkJob({ id, title, company, location, url, salary, description, postedAt, source, tags }) {
+    return { id, title: (title||'').trim(), company: (company||'').trim(),
+      location: (location||'').trim(), url: url||'', salary: salary||'',
+      description: (description||'').trim(), postedAt, source, tags: tags||[],
+      score: 0, bestResumeId: null };
+  }
+
+  function stripHtml(s) { return (s||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim(); }
+
+  /* ── RemoteOK ── */
+  async function fetchRemoteOK() {
+    const tag = (APP.settings.jobTitles || 'software-engineer')
+      .split(',')[0].trim().toLowerCase().replace(/\s+/g,'-');
+    try {
+      const res  = await fetch(`${PROXY}${encodeURIComponent('https://remoteok.com/api?tag=' + tag)}`);
+      const data = await res.json();
+      if (!Array.isArray(data)) return [];
+      return data.slice(1)
+        .filter(j => j && j.position && isWithin12h(j.date))
+        .map(j => mkJob({
+          id: 'rok_' + j.id, title: j.position, company: j.company,
+          location: j.location || 'Remote', url: j.url,
+          salary: j.salary_min
+            ? `$${Math.round(j.salary_min/1000)}k – $${Math.round(j.salary_max/1000)}k/yr` : '',
+          description: stripHtml(j.description), postedAt: j.date,
+          source: 'RemoteOK', tags: j.tags || [],
+        }));
+    } catch(e) { console.warn('RemoteOK:', e.message); return []; }
+  }
+
+  /* ── Arbeitnow ── */
+  async function fetchArbeitnow() {
+    const titles = (APP.settings.jobTitles || 'software engineer')
+      .split(',').map(t => t.trim().toLowerCase());
+    try {
+      const res  = await fetch('https://www.arbeitnow.com/api/job-board-api');
+      const data = await res.json();
+      if (!data.data) return [];
+      return data.data
+        .filter(j => {
+          if (!isWithin12h(j.created_at)) return false;
+          const t = (j.title||'').toLowerCase();
+          return titles.some(kw => t.includes(kw.split(' ')[0]));
+        })
+        .slice(0, 40)
+        .map(j => mkJob({
+          id: 'arb_' + j.slug, title: j.title, company: j.company_name,
+          location: j.location || (j.remote ? 'Remote' : 'On-site'),
+          url: j.url, salary: '',
+          description: stripHtml(j.description),
+          postedAt: new Date(j.created_at * 1000).toISOString(),
+          source: 'Arbeitnow', tags: j.tags || [],
+        }));
+    } catch(e) { console.warn('Arbeitnow:', e.message); return []; }
+  }
+
+  /* ── Adzuna (optional) ── */
+  async function fetchAdzuna() {
+    const { adzunaAppId: appId, adzunaAppKey: appKey, adzunaCountry: cc,
+            jobTitles, location } = APP.settings;
+    if (!appId || !appKey) return [];
+    const titles  = (jobTitles || 'software engineer').split(',').map(t => t.trim());
+    const results = [];
+    for (const title of titles.slice(0, 2)) {
+      try {
+        const p = new URLSearchParams({
+          app_id: appId, app_key: appKey, what: title,
+          where: location || '', max_days_old: '0',
+          results_per_page: '20', sort_by: 'date',
+        });
+        const res  = await fetch(`https://api.adzuna.com/v1/api/jobs/${cc||'us'}/search/1?${p}`);
+        const data = await res.json();
+        if (!data.results) continue;
+        data.results
+          .filter(j => isWithin12h(j.created))
+          .forEach(j => results.push(mkJob({
+            id: 'adz_' + j.id, title: j.title,
+            company: j.company?.display_name || '',
+            location: j.location?.display_name || '',
+            url: j.redirect_url,
+            salary: j.salary_min && j.salary_max
+              ? `$${Math.round(j.salary_min/1000)}k – $${Math.round(j.salary_max/1000)}k/yr`
+              : j.salary_min ? `From $${Math.round(j.salary_min/1000)}k/yr` : '',
+            description: stripHtml(j.description),
+            postedAt: j.created, source: 'Adzuna', tags: [],
+          })));
+      } catch(e) { console.warn('Adzuna:', e.message); }
+    }
+    return results;
+  }
+
+  /* ── Orchestrate ── */
+  async function fetchJobs() {
+    if (APP.resumes.length === 0) {
+      showToast('Upload a resume first.'); showView('setup'); return;
+    }
+    const btn  = document.getElementById('btn-fetch');
+    const icon = document.getElementById('fetch-icon');
+    btn.disabled = true; btn.classList.add('opacity-70');
+    icon.classList.add('animate-spin');
+    showToast('Searching fresh jobs from the last 12 hours…', 4000);
+
+    try {
+      const [r1, r2, r3] = await Promise.allSettled([
+        fetchRemoteOK(), fetchArbeitnow(), fetchAdzuna()
+      ]);
+      const all = [
+        ...(r1.status==='fulfilled' ? r1.value : []),
+        ...(r2.status==='fulfilled' ? r2.value : []),
+        ...(r3.status==='fulfilled' ? r3.value : []),
+      ];
+      // Deduplicate by URL
+      const seen = new Set();
+      const unique = all.filter(j => {
+        if (!j.url || seen.has(j.url)) return false;
+        seen.add(j.url); return true;
+      });
+      // Score each job
+      unique.forEach(j => {
+        const { score, resumeId } = bestResumeFor(j);
+        j.score = score; j.bestResumeId = resumeId;
+      });
+      // Sort: score desc → date desc
+      unique.sort((a,b) => b.score - a.score || new Date(b.postedAt) - new Date(a.postedAt));
+
+      APP.jobs = unique;
+      persistJobs();
+      showView('dashboard');
+      renderDashboard();
+      showToast(unique.length
+        ? `Found ${unique.length} fresh job${unique.length!==1?'s':''}!`
+        : 'No jobs posted in the last 12 h. Try adding more keywords in Settings.');
+    } catch(e) {
+      showToast('Fetch error — check your connection.');
+      console.error(e);
+    } finally {
+      btn.disabled = false; btn.classList.remove('opacity-70');
+      icon.classList.remove('animate-spin');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 8 — FIT SCORING
+  // ═══════════════════════════════════════════════════
+
+  const TECH_KW = new Set([
+    'javascript','typescript','python','java','c++','c#','go','golang','rust','ruby','php',
+    'swift','kotlin','scala','r','matlab','html','css','sass','less',
+    'react','vue','angular','svelte','nextjs','next.js','nuxt','gatsby','remix',
+    'node','nodejs','express','fastapi','django','flask','rails','spring','laravel',
+    'sql','postgresql','postgres','mysql','sqlite','mongodb','redis','elasticsearch',
+    'dynamodb','firebase','supabase','prisma','graphql','rest','grpc','websocket',
+    'aws','azure','gcp','cloud','docker','kubernetes','k8s','terraform','ansible',
+    'ci/cd','jenkins','github actions','gitlab','devops','linux','bash','shell',
+    'machine learning','ml','ai','deep learning','nlp','llm','tensorflow','pytorch',
+    'pandas','numpy','spark','kafka','airflow','dbt','etl','data pipeline',
+    'agile','scrum','kanban','git','testing','jest','cypress','selenium','unit test',
+    'microservices','serverless','api','backend','frontend','fullstack','full-stack',
+    'figma','ux','ui','product','leadership','communication','mentoring',
+  ]);
+
+  function kwSet(text) {
+    const lower = (text || '').toLowerCase();
+    const found = new Set();
+    TECH_KW.forEach(kw => { if (lower.includes(kw)) found.add(kw); });
+    // Also pick up capitalised tokens (likely tech names)
+    const caps = lower.match(/\b[a-z][a-z0-9.#+-]{2,}\b/g) || [];
+    caps.forEach(t => found.add(t));
+    return found;
+  }
+
+  function scoreResumeVsJob(resume, job) {
+    const jobText    = `${job.title} ${job.description} ${(job.tags||[]).join(' ')}`;
+    const jobKws     = kwSet(jobText);
+    const resumeKws  = kwSet(resume.text);
+
+    if (jobKws.size === 0) return 50; // no signals, neutral
+
+    const overlap    = [...jobKws].filter(k => resumeKws.has(k)).length;
+    const kwScore    = Math.round((overlap / jobKws.size) * 65);
+
+    // Title bonus — does the resume mention any word from the job title?
+    const titleWords = (job.title || '').toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const titleBonus = titleWords.some(w => resume.text.toLowerCase().includes(w)) ? 20 : 0;
+
+    // Location bonus — remote or matching location
+    const loc        = (job.location || '').toLowerCase();
+    const locBonus   = loc.includes('remote') || loc === '' ? 10 : 5;
+
+    return Math.min(99, kwScore + titleBonus + locBonus);
+  }
+
+  function bestResumeFor(job) {
+    if (!APP.resumes.length) return { score: 0, resumeId: null };
+    let best = { score: -1, resumeId: APP.resumes[0].id };
+    APP.resumes.forEach(r => {
+      const s = scoreResumeVsJob(r, job);
+      if (s > best.score) best = { score: s, resumeId: r.id };
+    });
+    return best;
+  }
+
+  function scoreLabel(score) {
+    if (score >= 70) return { label: 'Strong Fit',   cls: 'score-strong'   };
+    if (score >= 45) return { label: 'Moderate Fit', cls: 'score-moderate' };
+    return               { label: 'Low Fit',      cls: 'score-low'      };
+  }
+
+  function timeAgo(dateStr) {
+    const mins = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
+    if (mins < 60)  return `${mins}m ago`;
+    if (mins < 1440) return `${Math.floor(mins/60)}h ago`;
+    return `${Math.floor(mins/1440)}d ago`;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 9 — DASHBOARD UI
+  // ═══════════════════════════════════════════════════
+
+  function getFilteredJobs() {
+    const kw  = (document.getElementById('filter-keywords')?.value || '').toLowerCase();
+    const src = document.getElementById('filter-source')?.value || '';
+    const min = parseInt(document.getElementById('filter-score')?.value || '0');
+    return APP.jobs.filter(j => {
+      if (src && j.source !== src) return false;
+      if (j.score < min) return false;
+      if (kw && !`${j.title} ${j.company} ${j.description} ${(j.tags||[]).join(' ')}`.toLowerCase().includes(kw)) return false;
+      return true;
+    });
+  }
+
+  function renderDashboard() {
+    const grid  = document.getElementById('jobs-grid');
+    const empty = document.getElementById('jobs-empty');
+    const count = document.getElementById('job-count');
+    if (!grid) return;
+
+    const jobs = getFilteredJobs();
+    count.textContent = jobs.length ? `${jobs.length} job${jobs.length!==1?'s':''} found` : '';
+
+    if (jobs.length === 0) {
+      grid.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    grid.innerHTML = jobs.map(renderJobCard).join('');
+  }
+
+  function renderJobCard(job) {
+    const sl   = scoreLabel(job.score);
+    const res  = APP.resumes.find(r => r.id === job.bestResumeId);
+    const tags = (job.tags||[]).slice(0,4)
+      .map(t => `<span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">${esc(t)}</span>`)
+      .join('');
+    const salary = job.salary
+      ? `<span class="text-xs text-green-600 font-semibold">${esc(job.salary)}</span>` : '';
+
+    return `
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col gap-3 fade-up hover:shadow-md transition-shadow cursor-pointer"
+           onclick="openJobDetail('${job.id}')">
+        <!-- Title + score -->
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex-1 min-w-0">
+            <h3 class="font-semibold text-slate-900 leading-snug line-clamp-2" title="${esc(job.title)}">${esc(job.title)}</h3>
+            <p class="text-sm text-slate-500 mt-0.5 truncate">${esc(job.company)}</p>
+          </div>
+          <div class="shrink-0 text-right ml-2">
+            <div class="text-xl font-bold ${sl.cls.replace('score-','text-').replace('strong','green-700').replace('moderate','yellow-700').replace('low','slate-500')}">${job.score}%</div>
+            <div class="text-xs ${sl.cls} border rounded-full px-2 py-0.5 mt-0.5">${sl.label}</div>
+          </div>
+        </div>
+        <!-- Meta -->
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+          <span>📍 ${esc(job.location || 'Not specified')}</span>
+          ${salary ? `<span class="text-slate-300">•</span>${salary}` : ''}
+          <span class="text-slate-300">•</span>
+          <span>${timeAgo(job.postedAt)}</span>
+          <span class="text-slate-300">•</span>
+          <span class="bg-slate-100 px-1.5 py-0.5 rounded">${esc(job.source)}</span>
+        </div>
+        <!-- Tags -->
+        ${tags ? `<div class="flex flex-wrap gap-1">${tags}</div>` : ''}
+        <!-- Footer -->
+        <div class="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+          <span class="text-xs text-slate-400 truncate">
+            ${res ? `📄 <span class="text-slate-600 font-medium">${esc(res.name)}</span>` : ''}
+          </span>
+          <button onclick="event.stopPropagation();openJobDetail('${job.id}')"
+            class="shrink-0 text-xs bg-teal-50 hover:bg-teal-100 text-teal-700 font-medium px-3 py-1 rounded-full transition-colors">
+            View &amp; Tailor →
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 10 — JOB DETAIL MODAL
+  // ═══════════════════════════════════════════════════
+
+  function openJobDetail(jobId) {
+    const job = APP.jobs.find(j => j.id === jobId);
+    if (!job) return;
+    APP.selectedJobId = jobId;
+
+    const sl  = scoreLabel(job.score);
+    const res = APP.resumes.find(r => r.id === job.bestResumeId);
+
+    document.getElementById('jd-title').textContent   = job.title;
+    document.getElementById('jd-company').textContent = job.company;
+    document.getElementById('jd-location').textContent= job.location || 'Location not specified';
+    document.getElementById('jd-source').textContent  = job.source;
+    document.getElementById('jd-posted').textContent  = `Posted ${timeAgo(job.postedAt)}`;
+    document.getElementById('jd-description').textContent =
+      job.description || 'No description available for this posting.';
+    document.getElementById('jd-apply-btn').href = job.url || '#';
+
+    // Salary
+    const salaryEl = document.getElementById('jd-salary');
+    if (job.salary) {
+      salaryEl.textContent = `💰 ${job.salary}`;
+      salaryEl.classList.remove('hidden');
+    } else {
+      salaryEl.classList.add('hidden');
+    }
+
+    // Score
+    document.getElementById('jd-score').textContent =
+      `${sl.label} — ${job.score}% match`;
+
+    // Resume recommendation
+    document.getElementById('jd-resume-rec').textContent =
+      res ? `📄 Best resume: ${res.name}` : '📄 No resume on file';
+
+    // Tailor button
+    const tailorBtn = document.getElementById('jd-tailor-btn');
+    if (!APP.settings.groqApiKey) {
+      tailorBtn.textContent = '✨ Set Groq key in Settings first';
+      tailorBtn.disabled    = true;
+      tailorBtn.classList.add('opacity-50','cursor-not-allowed');
+    } else {
+      tailorBtn.innerHTML   = '✨ Tailor Resume with AI';
+      tailorBtn.disabled    = false;
+      tailorBtn.classList.remove('opacity-50','cursor-not-allowed');
+    }
+
+    openModal('modal-job');
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 11 — AI TAILORING (GROQ)
+  // ═══════════════════════════════════════════════════
+
+  async function callGroq(prompt) {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method:  'POST',
+      headers: {
+        'Authorization': `Bearer ${APP.settings.groqApiKey}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({
+        model:       'llama-3.3-70b-versatile',
+        temperature: 0.25,
+        max_tokens:  2000,
+        messages:    [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Groq API error ${res.status}`);
+    }
+    const data = await res.json();
+    return (data.choices[0]?.message?.content || '').trim();
+  }
+
+  function buildTailorPrompt(resume, job) {
+    const sections = (resume.sections||[]).length > 0
+      ? `Detected sections in order: ${resume.sections.join(' → ')}`
+      : 'No sections detected — mirror the exact structure of the original.';
+
+    const jobDesc = (job.description || '').slice(0, 3500);
+
+    return `You are a world-class ATS resume optimiser and professional resume writer. Your rewrites routinely get candidates past ATS filters and onto hiring-manager desks.
+
+TASK: Rewrite the candidate's resume to be perfectly tailored for the target job.
+
+━━━ ORIGINAL RESUME ━━━━━━━━━━━━━━━━━━━━
+${resume.text}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+━━━ TARGET JOB ━━━━━━━━━━━━━━━━━━━━━━━━━
+Title:   ${job.title}
+Company: ${job.company}
+Location:${job.location}
+${job.salary ? `Salary:  ${job.salary}` : ''}
+
+Job Description:
+${jobDesc}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RESUME STRUCTURE:
+${sections}
+
+════ RULES — FOLLOW EXACTLY ════
+1. PRESERVE the EXACT same sections in the EXACT same order as the original
+2. Keep the same formatting style: bullet style (-, •, *), date formats, capitalisation patterns
+3. MUST fit on ONE printed page (US Letter, 0.55" margins) — be concise; cut less relevant content
+4. Mirror EXACT terminology from the job description throughout (ATS keyword match)
+5. NEVER change: candidate's name, email, phone, LinkedIn, actual employers, actual job titles, actual degrees
+6. Quantify impact using numbers where the JD values metrics; estimate if needed (keep plausible)
+7. Remove or trim content unrelated to this specific role — never add new unrelated sections
+8. Do NOT add empty filler phrases ("Results-driven", "Passionate about", "Dynamic")
+9. Do NOT add any preamble, explanation, or markdown fences
+10. Output ONLY the plain-text tailored resume — nothing else
+
+TAILORED RESUME:`;
+  }
+
+  async function tailorWithAI(resumeId, jobId) {
+    const resume = APP.resumes.find(r => r.id === resumeId);
+    const job    = APP.jobs.find(j => j.id === jobId);
+    if (!resume) throw new Error('Resume not found.');
+    if (!job)    throw new Error('Job not found.');
+    if (!APP.settings.groqApiKey) throw new Error('Groq API key missing — add it in Settings.');
+    return callGroq(buildTailorPrompt(resume, job));
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 12 — TAILOR MODAL + PRINT-TO-PDF
+  // ═══════════════════════════════════════════════════
+
+  function openTailorModal() {
+    const job = APP.jobs.find(j => j.id === APP.selectedJobId);
+    if (!job) return;
+    APP.tailorJobId    = job.id;
+    APP.tailorResumeId = job.bestResumeId || APP.resumes[0]?.id;
+
+    // Show loading
+    document.getElementById('tailor-loading').classList.remove('hidden');
+    document.getElementById('tailor-result').classList.add('hidden');
+    document.getElementById('tailor-error').classList.add('hidden');
+
+    // Populate resume selector
+    const sel  = document.getElementById('tailor-resume-select');
+    const wrap = document.getElementById('tailor-selector-wrap');
+    if (APP.resumes.length > 1) {
+      sel.innerHTML = APP.resumes
+        .map(r => `<option value="${r.id}"${r.id===APP.tailorResumeId?' selected':''}>${esc(r.name)}</option>`)
+        .join('');
+      wrap.classList.remove('hidden');
+    } else {
+      wrap.classList.add('hidden');
+    }
+
+    openModal('modal-tailor');
+    runTailor();
+  }
+
+  async function retailor() {
+    APP.tailorResumeId = document.getElementById('tailor-resume-select').value;
+    document.getElementById('tailor-loading').classList.remove('hidden');
+    document.getElementById('tailor-result').classList.add('hidden');
+    document.getElementById('tailor-error').classList.add('hidden');
+    await runTailor();
+  }
+
+  async function runTailor() {
+    try {
+      const text = await tailorWithAI(APP.tailorResumeId, APP.tailorJobId);
+      APP.tailoredText = text;
+      document.getElementById('tailor-output').textContent = text;
+      document.getElementById('tailor-loading').classList.add('hidden');
+      document.getElementById('tailor-result').classList.remove('hidden');
+      // Keep selector visible after result loads
+      if (APP.resumes.length > 1) {
+        document.getElementById('tailor-selector-wrap').classList.remove('hidden');
+      }
+    } catch(e) {
+      document.getElementById('tailor-loading').classList.add('hidden');
+      document.getElementById('tailor-error').classList.remove('hidden');
+      document.getElementById('tailor-error-msg').textContent = e.message || 'Something went wrong.';
+    }
+  }
+
+  async function copyTailored() {
+    try {
+      await navigator.clipboard.writeText(APP.tailoredText);
+      showToast('Copied to clipboard!');
+    } catch { showToast('Select the text above and copy manually.'); }
+  }
+
+  /* ── Print / Download as PDF ── */
+  function downloadTailored() {
+    if (!APP.tailoredText) return;
+    const job    = APP.jobs.find(j => j.id === APP.tailorJobId)    || {};
+    const resume = APP.resumes.find(r => r.id === APP.tailorResumeId) || {};
+
+    // Build styled HTML that mirrors the original resume's structure
+    const sectionSet = new Set((resume.sections || []).map(s => s.toLowerCase().trim().slice(0,12)));
+    const lines      = APP.tailoredText.split('\n');
+    let   firstNonEmpty = true;
+
+    const htmlLines = lines.map(raw => {
+      const line = raw.trim();
+      if (!line) return '<div style="margin:0.18em 0"></div>';
+
+      // Detect name line (very first non-empty line)
+      if (firstNonEmpty) {
+        firstNonEmpty = false;
+        return `<div style="font-size:18pt;font-weight:800;letter-spacing:0.01em;color:#0f172a;margin-bottom:0.1em">${esc(line)}</div>`;
+      }
+
+      // Detect contact / header line (contains @ or | or http or phone pattern)
+      if (/@|https?:|linkedin\.com|\||\(\d{3}\)/.test(line) && line.length < 180) {
+        return `<div style="font-size:9pt;color:#475569;margin-bottom:0.35em">${esc(line)}</div>`;
+      }
+
+      // Detect section header
+      const isHeader =
+        /^[A-Z][A-Z\s&\/\-]{3,}$/.test(line) ||        // ALL-CAPS line
+        sectionSet.has(line.toLowerCase().slice(0,12)) || // matches known section
+        SECTION_PATTERNS.some(p => p.test(line));
+
+      if (isHeader && line.length < 60) {
+        return `<div style="font-size:10.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#0f172a;border-bottom:1.5px solid #334155;padding-bottom:0.15em;margin-top:0.7em;margin-bottom:0.25em">${esc(line)}</div>`;
+      }
+
+      // Bullet line
+      if (/^[-•·▸▪*]\s/.test(line)) {
+        return `<div style="font-size:9.5pt;line-height:1.35;margin-left:1.1em;margin-top:0.1em;color:#1e293b;position:relative">
+          <span style="position:absolute;left:-0.9em">•</span>${esc(line.replace(/^[-•·▸▪*]\s/,''))}</div>`;
+      }
+
+      // Default line (job title, company, date rows, etc.)
+      return `<div style="font-size:9.5pt;line-height:1.4;color:#1e293b;margin-top:0.07em">${esc(line)}</div>`;
+    }).join('');
+
+    document.getElementById('print-content').innerHTML = `
+      <div style="font-family:'Helvetica Neue',Arial,sans-serif;color:#0f172a;max-width:100%">
+        ${htmlLines}
+        <div style="margin-top:1.2em;padding-top:0.4em;border-top:1px solid #e2e8f0;font-size:7pt;color:#94a3b8;text-align:center">
+          Tailored for: ${esc(job.title||'')} at ${esc(job.company||'')} · Generated by FreshFit
+        </div>
+      </div>`;
+
+    document.getElementById('print-overlay').classList.remove('hidden');
+  }
+
+  function triggerPrint()      { window.print(); }
+  function closePrintOverlay() { document.getElementById('print-overlay').classList.add('hidden'); }
+
+  function toggleGroqKey() {
+    const el = document.getElementById('s-groq-key');
+    el.type = el.type === 'password' ? 'text' : 'password';
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TASK 13 — MODALS, NAVIGATION, UTILITIES, INIT
+  // ═══════════════════════════════════════════════════
+
+  /* ── Modals ── */
+  function openModal(id) {
+    const backdrop = document.getElementById('modal-backdrop');
+    backdrop.classList.remove('hidden');
+    backdrop.classList.add('open'); // triggers flex display via CSS
+    document.querySelectorAll('[id^="modal-"]:not(#modal-backdrop)')
+      .forEach(el => el.classList.add('hidden'));
+    document.getElementById(id)?.classList.remove('hidden');
+  }
+
+  function closeModal() {
+    const backdrop = document.getElementById('modal-backdrop');
+    backdrop.classList.add('hidden');
+    backdrop.classList.remove('open');
+    document.querySelectorAll('[id^="modal-"]:not(#modal-backdrop)')
+      .forEach(el => el.classList.add('hidden'));
+    APP.editingResumeId = null;
+  }
+
+  function handleBackdropClick(e) {
+    if (e.target === document.getElementById('modal-backdrop')) closeModal();
+  }
+
+  /* ── Navigation ── */
+  function showView(name) {
+    // If no resumes yet, always land on setup
+    const target = (APP.resumes.length === 0 && name === 'dashboard') ? 'setup' : name;
+    APP.currentView = target;
+
+    ['setup','dashboard','resumes','settings'].forEach(v => {
+      document.getElementById(`view-${v}`)?.classList.add('hidden');
+    });
+    document.getElementById(`view-${target}`)?.classList.remove('hidden');
+
+    // Nav highlight
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    const activeId = target === 'setup' ? 'nav-dashboard' : `nav-${target}`;
+    document.getElementById(activeId)?.classList.add('active');
+
+    // Side effects
+    if (target === 'resumes')  renderResumesView();
+    if (target === 'settings') populateSettingsForm();
+    if (target === 'dashboard') renderDashboard();
+  }
+
+  /* ── Toast ── */
+  let _toastTimer;
+  function showToast(msg, ms = 3200) {
+    const inner = document.getElementById('toast-inner');
+    inner.textContent = msg;
+    inner.classList.add('show');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => inner.classList.remove('show'), ms);
+  }
+
+  /* ── HTML escape ── */
+  function esc(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  /* ── Keyboard shortcuts ── */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (!document.getElementById('print-overlay').classList.contains('hidden')) {
+        closePrintOverlay();
+      } else {
+        closeModal();
+      }
+    }
+  });
+
+  /* ── Init ── */
+  function init() {
+    loadPersistedState();
+
+    if (APP.resumes.length === 0) {
+      showView('setup');
+    } else {
+      showView('dashboard');
+      if (APP.jobs.length === 0) fetchJobs();
+    }
+  }
+
+  init();
+
+  function setLastUpdated(iso) {
+    const el = document.getElementById('last-updated');
+    if (!el) return;
+    const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (mins < 1)  el.textContent = 'Updated just now';
+    else if (mins < 60) el.textContent = `Updated ${mins}m ago`;
+    else el.textContent = `Updated ${Math.floor(mins / 60)}h ago`;
+  }
+  </script>
+
+</body>
+</html>
