@@ -168,6 +168,7 @@
           <option value="RemoteOK">RemoteOK</option>
           <option value="Arbeitnow">Arbeitnow</option>
           <option value="Adzuna">Adzuna</option>
+          <option value="LinkedIn">LinkedIn</option>
         </select>
         <select id="filter-score" onchange="renderDashboard()"
           class="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
@@ -272,6 +273,29 @@
               <option value="in">India</option>
             </select>
           </div>
+        </div>
+
+        <!-- Apify / LinkedIn -->
+        <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+          <h3 class="font-semibold text-lg mb-1">
+            LinkedIn Jobs via Apify
+            <span class="ml-2 text-xs font-normal text-teal-600 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">Recommended</span>
+          </h3>
+          <p class="text-sm text-slate-500 mb-4">
+            Free at <a href="https://apify.com" target="_blank" class="text-teal-600 hover:underline">apify.com</a> —
+            $5 free credit/month (≈ thousands of LinkedIn jobs). No credit card needed.
+            Get your token under <strong>Settings → Integrations → API token</strong>.
+          </p>
+          <label class="block text-sm font-medium mb-1">Apify API Token</label>
+          <div class="flex gap-2">
+            <input id="s-apify-key" type="password" placeholder="apify_api_…"
+              class="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            <button onclick="toggleApifyKey()" class="text-xs border border-slate-200 px-3 rounded-lg hover:bg-slate-50 text-slate-500">Show</button>
+          </div>
+          <p id="apify-credit-warning" class="hidden mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            ⚠️ Apify credits exhausted — LinkedIn jobs paused until your monthly credits reset.
+            <a href="https://console.apify.com/billing" target="_blank" class="underline ml-1">Check billing →</a>
+          </p>
         </div>
 
         <div class="flex items-center gap-4">
@@ -511,6 +535,7 @@
     adzunaAppId:   '',
     adzunaAppKey:  '',
     adzunaCountry: 'us',
+    apifyApiKey:   '',
     jobTitles:     'Software Engineer, Frontend Developer',
     location:      'Remote',
   };
@@ -773,6 +798,7 @@
 
   function populateSettingsForm() {
     const s = APP.settings;
+    document.getElementById('s-apify-key').value     = s.apifyApiKey   || '';
     document.getElementById('s-groq-key').value      = s.groqApiKey    || '';
     document.getElementById('s-adzuna-id').value     = s.adzunaAppId   || '';
     document.getElementById('s-adzuna-key').value    = s.adzunaAppKey  || '';
@@ -783,6 +809,7 @@
 
   function saveSettings() {
     APP.settings = {
+      apifyApiKey:   document.getElementById('s-apify-key').value.trim(),
       groqApiKey:    document.getElementById('s-groq-key').value.trim(),
       adzunaAppId:   document.getElementById('s-adzuna-id').value.trim(),
       adzunaAppKey:  document.getElementById('s-adzuna-key').value.trim(),
@@ -867,6 +894,115 @@
     } catch(e) { console.warn('Arbeitnow:', e.message); return []; }
   }
 
+  /* ── Apify / LinkedIn ── */
+  const APIFY_ACTOR    = 'bebity~linkedin-jobs-scraper';
+  const APIFY_SYNC_URL = `https://api.apify.com/v2/acts/${APIFY_ACTOR}/run-sync-get-dataset-items`;
+
+  // Friendly messages for specific Apify error conditions
+  const APIFY_ERRORS = {
+    402: '⚠️ Apify credits exhausted — LinkedIn jobs paused until your monthly free credits reset. Check console.apify.com/billing.',
+    401: '🔑 Apify API token is invalid. Check Settings → paste the correct token.',
+    429: '⏳ Apify rate limit hit — wait a minute and try again.',
+    timeout: '⏱️ LinkedIn scrape timed out. Apify is busy — try again in a moment.',
+    actor: '🔧 LinkedIn scraper actor unavailable on Apify. Try again later.',
+  };
+
+  async function fetchApifyLinkedIn() {
+    const token = APP.settings.apifyApiKey;
+    if (!token) return [];
+
+    // Hide any previous credit warning
+    document.getElementById('apify-credit-warning')?.classList.add('hidden');
+
+    const titles   = (APP.settings.jobTitles || 'software engineer')
+      .split(',').map(t => t.trim()).filter(Boolean);
+    const location = APP.settings.location || '';
+
+    // Build one search query per title (max 3 to stay within free limits)
+    const searchQueries = titles.slice(0, 3).map(q => ({
+      query: location ? `${q} ${location}` : q,
+    }));
+
+    let res;
+    try {
+      res = await fetch(
+        `${APIFY_SYNC_URL}?token=${encodeURIComponent(token)}&timeout=90&memory=256`,
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            searchQueries,
+            datePosted:  'Past 24 hours', // LinkedIn only offers 24h minimum; we filter to 12h below
+            maxResults:  40,
+            scrapeCompany:     false,
+            scrapeJobDetails:  true,
+          }),
+        }
+      );
+    } catch (netErr) {
+      console.warn('Apify network error:', netErr.message);
+      showToast('LinkedIn (Apify): network error — skipped.', 4000);
+      return [];
+    }
+
+    // ── Error handling by status code ──
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+
+      if (res.status === 402) {
+        // Credits exhausted — show persistent warning in Settings
+        document.getElementById('apify-credit-warning')?.classList.remove('hidden');
+        showToast(APIFY_ERRORS[402], 6000);
+        return [];
+      }
+      if (res.status === 401) {
+        showToast(APIFY_ERRORS[401], 5000);
+        return [];
+      }
+      if (res.status === 429) {
+        showToast(APIFY_ERRORS[429], 5000);
+        return [];
+      }
+      // Actor not found or 5xx
+      const msg = body?.error?.message || '';
+      if (msg.toLowerCase().includes('actor') || res.status === 404) {
+        showToast(APIFY_ERRORS.actor, 5000);
+      } else if (res.status === 408 || msg.toLowerCase().includes('timeout')) {
+        showToast(APIFY_ERRORS.timeout, 5000);
+      } else {
+        showToast(`LinkedIn (Apify): error ${res.status} — ${msg || 'skipped'}.`, 5000);
+      }
+      console.warn('Apify error:', res.status, body);
+      return [];
+    }
+
+    // ── Parse results ──
+    let data;
+    try { data = await res.json(); } catch { return []; }
+    if (!Array.isArray(data)) return [];
+
+    return data
+      .filter(j => j && j.title)
+      .filter(j => {
+        // Apify returns postedAt as ISO string or relative; best-effort 12h filter
+        const raw = j.postedAt || j.datePosted || j.publishedAt || '';
+        if (!raw) return true; // include if no date info
+        return isWithin12h(raw);
+      })
+      .map(j => mkJob({
+        id:          'li_' + (j.id || j.jobId || Math.random().toString(36).slice(2)),
+        title:       j.title,
+        company:     j.companyName || j.company || '',
+        location:    j.location    || '',
+        url:         j.jobUrl      || j.url || '',
+        salary:      j.salary      || j.salaryRange || '',
+        description: stripHtml(j.description || j.descriptionHtml || ''),
+        postedAt:    j.postedAt    || j.datePosted || new Date().toISOString(),
+        source:      'LinkedIn',
+        tags:        j.skills      || [],
+      }));
+  }
+
   /* ── Adzuna (optional) ── */
   async function fetchAdzuna() {
     const { adzunaAppId: appId, adzunaAppKey: appKey, adzunaCountry: cc,
@@ -914,13 +1050,14 @@
     showToast('Searching fresh jobs from the last 12 hours…', 4000);
 
     try {
-      const [r1, r2, r3] = await Promise.allSettled([
-        fetchRemoteOK(), fetchArbeitnow(), fetchAdzuna()
+      const [r1, r2, r3, r4] = await Promise.allSettled([
+        fetchRemoteOK(), fetchArbeitnow(), fetchAdzuna(), fetchApifyLinkedIn()
       ]);
       const all = [
         ...(r1.status==='fulfilled' ? r1.value : []),
         ...(r2.status==='fulfilled' ? r2.value : []),
         ...(r3.status==='fulfilled' ? r3.value : []),
+        ...(r4.status==='fulfilled' ? r4.value : []),
       ];
       // Deduplicate by URL
       const seen = new Set();
@@ -1364,6 +1501,11 @@ TAILORED RESUME:`;
 
   function toggleGroqKey() {
     const el = document.getElementById('s-groq-key');
+    el.type = el.type === 'password' ? 'text' : 'password';
+  }
+
+  function toggleApifyKey() {
+    const el = document.getElementById('s-apify-key');
     el.type = el.type === 'password' ? 'text' : 'password';
   }
 
