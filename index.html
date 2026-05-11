@@ -125,7 +125,7 @@
         </div>
         <h2 class="text-3xl font-bold text-slate-900 mb-3">Welcome to FreshFit</h2>
         <p class="text-slate-500 text-lg mb-8">
-          Upload your resume once. Get matched to fresh job postings (last 12 hours) with AI-tailored resumes that pass ATS scans.
+          Upload your resume once. Get matched to fresh job postings (last 24 hours) with AI-tailored resumes that pass ATS scans.
         </p>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10 text-left">
           <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
@@ -185,7 +185,7 @@
       <div id="jobs-empty" class="hidden text-center py-20">
         <div class="text-6xl mb-4">🔍</div>
         <h3 class="text-xl font-semibold text-slate-700 mb-2">No jobs found yet</h3>
-        <p class="text-slate-500 mb-6">Click "Find Jobs" to pull fresh postings from the last 12 hours.</p>
+        <p class="text-slate-500 mb-6">Click "Find Jobs" to pull fresh postings from the last 24 hours.</p>
         <button onclick="fetchJobs()"
           class="bg-teal-500 hover:bg-teal-600 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
           Find Fresh Jobs
@@ -933,10 +933,17 @@
 
   function isWithin12h(raw) {
     if (!raw) return false;
-    const d = typeof raw === 'number' ? new Date(raw * 1000) : new Date(raw);
-    if (isNaN(d.getTime())) return false;
+    let d;
+    // Handle Unix timestamps (seconds if 9-10 digits, ms if 13 digits)
+    const n = Number(raw);
+    if (!isNaN(n) && n > 1e8) {
+      d = new Date(n < 1e12 ? n * 1000 : n);
+    } else {
+      d = new Date(raw);
+    }
+    if (isNaN(d.getTime())) return true; // unparseable → include
     const h = (Date.now() - d.getTime()) / 3_600_000;
-    return h >= 0 && h <= 12;
+    return h >= 0 && h <= 24; // 24h window for practical job volume
   }
 
   function mkJob({ id, title, company, location, url, salary, description, postedAt, source, tags }) {
@@ -980,10 +987,7 @@
       return data.data
         .filter(j => {
           if (!isWithin12h(j.created_at)) return false;
-          // Skip German-market postings (gender notation signals German-only listing)
-          if (/\(m\/[wf]\/d\)|\(m\/f\/[xd]\)|\(f\/m\/d\)/i.test(j.title||'')) return false;
           const t = (j.title||'').toLowerCase();
-          // Match if any meaningful word (4+ chars) from any configured title appears
           return titles.some(kw =>
             kw.toLowerCase().split(/\s+/).filter(w => w.length >= 4)
               .some(w => t.includes(w))
@@ -1360,7 +1364,7 @@
     const icon = document.getElementById('fetch-icon');
     btn.disabled = true; btn.classList.add('opacity-70');
     icon.classList.add('animate-spin');
-    showToast('Searching fresh jobs from the last 12 hours…', 4000);
+    showToast('Searching fresh jobs from the last 24 hours…', 4000);
 
     try {
       const [r1, r2, r3, r4, r5, r6] = await Promise.allSettled([
@@ -1395,7 +1399,7 @@
       renderDashboard();
       showToast(unique.length
         ? `Found ${unique.length} fresh job${unique.length!==1?'s':''}!`
-        : 'No jobs posted in the last 12 h. Try adding more keywords in Settings.');
+        : 'No jobs posted in the last 24 h. Try adding more keywords in Settings.');
     } catch(e) {
       showToast('Fetch error — check your connection.');
       console.error(e);
@@ -1426,7 +1430,6 @@
     'dedicated','passionate','motivated','proven','demonstrated','strong'
   ]);
 
-  // Extract all keywords from free text (resume or JD body).
   function extractKeywords(text) {
     const lower = (text || '').toLowerCase().replace(/[^a-z0-9\s+#.\-\/&]/g, ' ');
     const words = lower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
@@ -1438,39 +1441,77 @@
     return found;
   }
 
-  // Extract only the *meaningful* terms from a job posting:
-  // title words (always key) + description words that appear 2+ times (signal = requirement).
-  // Using this small set as the denominator avoids scoring against hundreds of boilerplate words.
-  function extractKeyTerms(title, desc, tags) {
-    const titleLower = (title || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-    const titleWords = titleLower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
-    const keyTerms   = new Set(titleWords);
-    for (let i = 0; i < titleWords.length - 1; i++) {
-      if (titleWords[i].length >= 3 && titleWords[i+1].length >= 3)
-        keyTerms.add(titleWords[i] + ' ' + titleWords[i+1]);
-    }
-    const descFull = `${desc || ''} ${(tags||[]).join(' ')}`.toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ');
-    const descWords = descFull.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
-    const freq = {};
-    descWords.forEach(w => { freq[w] = (freq[w]||0) + 1; });
-    Object.entries(freq).forEach(([w, c]) => { if (c >= 2) keyTerms.add(w); });
-    return keyTerms;
+  // Isolate the core role from a job title by stripping domain qualifiers.
+  // "Product Manager - Renewable Energy Platform (AI-Native) (m/w/d)" → "product manager"
+  // "Senior Software Engineer | FinTech"                               → "senior software engineer"
+  function extractCoreRole(title) {
+    const noParens = (title || '').replace(/\s*\([^)]*\)/g, '').trim();
+    const core     = noParens.split(/\s*[\-–|,\/]\s*/)[0].trim();
+    const noAt     = core.replace(/\s+at\s+.*/i, '').trim();
+    return (noAt.length >= 4 ? noAt : noParens).toLowerCase();
+  }
+
+  // Try to extract just the requirements/qualifications section from a JD.
+  // Falls back to the full description if no clear section header is found.
+  function extractRequirementsSection(desc) {
+    if (!desc || desc.length < 100) return desc || '';
+    const REQ_START = /\b(requirements?|qualifications?|what (you('re?| are?) |we'?re? )looking for|you (should|must|will) have|skills? (needed|required)|minimum qualifications?|preferred qualifications?|about you|what you bring|your background|your profile)\b/i;
+    const REQ_END   = /\b(about (us|the company|our company|this role|the role|the team)|what (you'?ll?|you will) (do|be doing|build|own)|key responsibilities|responsibilities|nice to have|benefits?|perks|compensation|salary|who we are|our (company|team|culture|mission))\b/i;
+    const startIdx  = desc.search(REQ_START);
+    if (startIdx === -1) return desc;
+    const after  = desc.slice(startIdx);
+    const endIdx = after.search(REQ_END);
+    const section = endIdx > 80 ? after.slice(0, endIdx) : after;
+    return section.length > 120 ? section : desc;
   }
 
   function scoreResumeVsJob(resume, job) {
-    const keyTerms  = extractKeyTerms(job.title, job.description, job.tags);
     const resumeKws = extractKeywords(resume.text);
-    if (keyTerms.size === 0) return 50;
 
-    const hits = [...keyTerms].filter(k => resumeKws.has(k)).length;
-    const base = Math.round((hits / keyTerms.size) * 80);
+    // ── 1. Core role match (60 pts) ──
+    // Strip domain qualifiers so "Product Manager - Renewable Energy" scores the
+    // same core-role points as a plain "Product Manager" posting.
+    const coreLower   = extractCoreRole(job.title);
+    const coreWords   = coreLower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+    const coreBigrams = [];
+    for (let i = 0; i < coreWords.length - 1; i++) {
+      if (coreWords[i].length >= 3 && coreWords[i+1].length >= 3)
+        coreBigrams.push(coreWords[i] + ' ' + coreWords[i+1]);
+    }
+    const uniScore = coreWords.length > 0
+      ? coreWords.filter(w => resumeKws.has(w)).length / coreWords.length : 0;
+    const biScore  = coreBigrams.length > 0
+      ? coreBigrams.filter(b => resumeKws.has(b)).length / coreBigrams.length
+      : uniScore;
+    // Phrase match (bigram) is stronger signal than individual word match
+    const coreScore = uniScore * 0.4 + biScore * 0.6;
 
-    // Remote jobs accessible to more people → slightly higher ceiling
-    const loc   = (job.location || '').toLowerCase();
-    const bonus = !loc || loc.includes('remote') ? 15 : 5;
+    // ── 2. Requirements/qualifications match (30 pts) ──
+    // Prefer the requirements section so company boilerplate, duties, and
+    // benefits don't dilute the score. Fall back to high-frequency desc words.
+    const reqText = extractRequirementsSection(job.description || '');
+    let reqScore  = 0;
+    if (reqText !== (job.description || '') && reqText.length > 120) {
+      const reqKws = extractKeywords(reqText);
+      reqScore = reqKws.size > 0
+        ? [...reqKws].filter(k => resumeKws.has(k)).length / reqKws.size : 0;
+    } else {
+      const dWords = (job.description || '').toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+        .filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+      const freq = {};
+      dWords.forEach(w => { freq[w] = (freq[w]||0) + 1; });
+      const freqKws = Object.keys(freq).filter(w => freq[w] >= 2);
+      reqScore = freqKws.length > 0
+        ? freqKws.filter(w => resumeKws.has(w)).length / freqKws.length : 0;
+    }
 
-    return Math.min(99, Math.max(5, base + bonus));
+    // ── 3. Remote bonus (10 pts) ──
+    const locAll   = ((job.location||'') + ' ' + (job.tags||[]).join(' ')).toLowerCase();
+    const locBonus = locAll.includes('remote') ? 10 : 0;
+
+    const base = Math.round(coreScore * 60 + reqScore * 30);
+    return Math.min(99, Math.max(5, base + locBonus));
   }
 
   function bestResumeFor(job) {
