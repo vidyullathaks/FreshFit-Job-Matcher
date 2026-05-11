@@ -1343,7 +1343,7 @@
   // TASK 8 — FIT SCORING
   // ═══════════════════════════════════════════════════
 
-  // ── Stop words filtered out of keyword extraction ──
+  // ── Stop words — generic noise, not domain knowledge ──
   const STOP_WORDS = new Set([
     'that','with','from','have','will','your','their','been','into','more',
     'also','than','when','each','such','both','about','work','role','using',
@@ -1355,82 +1355,44 @@
     'this','these','those','they','them','there','here','where','some','many',
     'most','other','time','very','just','only','even','back','being','having',
     'doing','going','over','under','between','after','before','part','new',
-    'high','help','take','need','create','develop','define','own','skills',
-    'ability','knowledge','understanding','key','plus','including','related'
+    'high','take','need','create','develop','define','own','skills','ability',
+    'knowledge','understanding','key','plus','including','related','focused',
+    'dedicated','passionate','motivated','proven','demonstrated','strong'
   ]);
 
-  // ── Known domain keywords (multi-word phrases + single words) ──
-  const DOMAIN_KW = new Set([
-    // Engineering
-    'javascript','typescript','python','java','c++','c#','go','golang','rust',
-    'ruby','php','swift','kotlin','scala','html','css','sass','less',
-    'react','vue','angular','svelte','nextjs','next.js','nuxt','gatsby','remix',
-    'node','nodejs','express','fastapi','django','flask','rails','spring','laravel',
-    'sql','postgresql','postgres','mysql','sqlite','mongodb','redis','elasticsearch',
-    'dynamodb','firebase','supabase','prisma','graphql','rest','grpc','websocket',
-    'aws','azure','gcp','docker','kubernetes','k8s','terraform','ansible',
-    'ci/cd','devops','linux','bash','shell','git','testing','jest','cypress',
-    'microservices','serverless','api','backend','frontend','fullstack',
-    // AI / Data
-    'machine learning','deep learning','nlp','llm','tensorflow','pytorch',
-    'pandas','numpy','spark','kafka','airflow','dbt','etl','data pipeline',
-    'tableau','looker','power bi','amplitude','mixpanel','segment','metabase',
-    'regression','classification','clustering','prediction','analytics',
-    // Product Management
-    'product manager','product management','product strategy','product roadmap',
-    'roadmap','stakeholder','stakeholders','okr','kpi','north star','metrics',
-    'prioritization','discovery','user research','customer interviews','personas',
-    'user journey','go-to-market','gtm','product launch','positioning','competitive',
-    'revenue','growth','retention','engagement','activation','conversion','funnel',
-    'backlog','sprint','grooming','retrospective','prd','requirements',
-    'a/b testing','experimentation','hypothesis','prototype','wireframe',
-    'cross-functional','alignment','executive','narrative','business case',
-    // Design / UX
-    'figma','sketch','invision','zeplin','framer','principle',
-    'ux','ui','user experience','interaction design','visual design',
-    'design system','accessibility','usability','typography','branding',
-    'user testing','heuristic','information architecture',
-    // Marketing / Growth
-    'seo','sem','ppc','content marketing','email marketing','social media',
-    'demand generation','lead generation','pipeline','attribution','conversion rate',
-    'brand','campaign','copywriting','content strategy','influencer',
-    // Operations / Business
-    'operations','process improvement','efficiency','automation','procurement',
-    'budget','forecasting','planning','vendor','compliance','governance','policy',
-    'p&l','revenue','ebitda','cost reduction','strategic planning',
-    // Soft/General
-    'agile','scrum','kanban','leadership','communication','mentoring','coaching',
-    'collaboration','presentation','stakeholder management',
-  ]);
-
-  // Extract ALL meaningful words from text (role-agnostic)
+  // Extract keywords purely from text — no hardcoded domain lists.
+  // Works for any role: engineering, PM, nursing, legal, finance, etc.
   function extractKeywords(text) {
-    const lower = (text || '').toLowerCase();
-    const found = new Set();
-    // Single words
-    lower.replace(/[^a-z0-9\s+#.\-\/&]/g,' ').split(/\s+/)
-      .filter(w => w.length >= 3 && !STOP_WORDS.has(w))
-      .forEach(w => found.add(w));
-    // Multi-word domain phrases
-    DOMAIN_KW.forEach(kw => { if (lower.includes(kw)) found.add(kw); });
+    const lower = (text || '').toLowerCase().replace(/[^a-z0-9\s+#.\-\/&]/g, ' ');
+    const words  = lower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+    const found  = new Set(words);
+
+    // Also extract bigrams (2-word phrases) so compound terms match:
+    // "product manager", "machine learning", "registered nurse", "tax law", etc.
+    for (let i = 0; i < words.length - 1; i++) {
+      if (words[i].length >= 3 && words[i + 1].length >= 3) {
+        found.add(words[i] + ' ' + words[i + 1]);
+      }
+    }
+
     return found;
   }
 
   function scoreResumeVsJob(resume, job) {
-    // Weight job title double — it's the strongest signal
-    const jobText    = `${job.title} ${job.title} ${job.description} ${(job.tags||[]).join(' ')}`;
-    const jobKws     = extractKeywords(jobText);
-    const resumeKws  = extractKeywords(resume.text);
+    // Weight job title 3× — strongest signal for relevance
+    const jobText   = `${job.title} ${job.title} ${job.title} ${job.description} ${(job.tags||[]).join(' ')}`;
+    const jobKws    = extractKeywords(jobText);
+    const resumeKws = extractKeywords(resume.text);
 
     if (jobKws.size === 0) return 50;
 
-    // Keyword overlap (70 pts max)
+    // Pure overlap: how much of the JD's vocabulary appears in the resume
     const overlap  = [...jobKws].filter(k => resumeKws.has(k)).length;
     const kwScore  = Math.round((overlap / jobKws.size) * 70);
 
-    // Title match: what fraction of title words appear in resume (20 pts max)
+    // Title match: what fraction of title words appear in the resume (20 pts max)
     const titleWords = (job.title || '').toLowerCase()
-      .split(/\s+/).filter(w => w.length > 3 && !STOP_WORDS.has(w));
+      .split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
     const titleHits  = titleWords.filter(w => resume.text.toLowerCase().includes(w)).length;
     const titleBonus = titleWords.length > 0
       ? Math.round((titleHits / titleWords.length) * 20) : 0;
