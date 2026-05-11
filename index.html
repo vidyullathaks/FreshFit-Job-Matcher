@@ -297,12 +297,13 @@
             <label class="block text-sm font-medium mb-1">LinkedIn Scraper Actor ID
               <span class="text-slate-400 font-normal ml-1">— find working actors at apify.com/store → search "linkedin jobs"</span>
             </label>
-            <input id="s-linkedin-actor" type="text" placeholder="bebity~linkedin-jobs-scraper"
+            <input id="s-linkedin-actor" type="text" placeholder="hireforce~linkedin-jobs-scraper"
               class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
             <p class="text-xs text-slate-400 mt-1">
-              If you see "actor unavailable", the actor may need a paid plan. Try
-              <code class="bg-slate-100 px-1 rounded">curious_coder~linkedin-job-scraper</code> or
-              <code class="bg-slate-100 px-1 rounded">anchor~linkedin-jobs-scraper</code> instead.
+              If you see "actor unavailable", try
+              <code class="bg-slate-100 px-1 rounded">curious_coder~linkedin-job-scraper</code>,
+              <code class="bg-slate-100 px-1 rounded">anchor~linkedin-jobs-scraper</code>, or search
+              <a href="https://apify.com/store?search=linkedin+jobs" target="_blank" class="underline">apify.com/store</a> for a working actor.
             </p>
           </div>
           <p id="apify-credit-warning" class="hidden mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -619,7 +620,7 @@
     adzunaAppKey:    '',
     adzunaCountry:   'us',
     apifyApiKey:          '',
-    apifyLinkedInActor:   'bebity~linkedin-jobs-scraper',
+    apifyLinkedInActor:   'hireforce~linkedin-jobs-scraper',
     targetCompanies:      '',
     careerCountry:   'us',
     jobTitles:       'Software Engineer, Frontend Developer',
@@ -891,7 +892,7 @@
   function populateSettingsForm() {
     const s = APP.settings;
     document.getElementById('s-apify-key').value        = s.apifyApiKey          || '';
-    document.getElementById('s-linkedin-actor').value   = s.apifyLinkedInActor  || 'bebity~linkedin-jobs-scraper';
+    document.getElementById('s-linkedin-actor').value   = s.apifyLinkedInActor  || 'hireforce~linkedin-jobs-scraper';
     document.getElementById('s-groq-key').value         = s.groqApiKey           || '';
     document.getElementById('s-target-companies').value = s.targetCompanies  || '';
     document.getElementById('s-career-country').value   = s.careerCountry    || 'us';
@@ -906,7 +907,7 @@
   function saveSettings() {
     APP.settings = {
       apifyApiKey:         document.getElementById('s-apify-key').value.trim(),
-      apifyLinkedInActor:  document.getElementById('s-linkedin-actor').value.trim() || 'bebity~linkedin-jobs-scraper',
+      apifyLinkedInActor:  document.getElementById('s-linkedin-actor').value.trim() || 'hireforce~linkedin-jobs-scraper',
       groqApiKey:          document.getElementById('s-groq-key').value.trim(),
       targetCompanies: document.getElementById('s-target-companies').value.trim(),
       careerCountry:   document.getElementById('s-career-country').value,
@@ -978,8 +979,14 @@
       return data.data
         .filter(j => {
           if (!isWithin12h(j.created_at)) return false;
+          // Skip German-market postings (gender notation signals German-only listing)
+          if (/\(m\/[wf]\/d\)|\(m\/f\/[xd]\)|\(f\/m\/d\)/i.test(j.title||'')) return false;
           const t = (j.title||'').toLowerCase();
-          return titles.some(kw => t.includes(kw.split(' ')[0]));
+          // Match if any meaningful word (4+ chars) from any configured title appears
+          return titles.some(kw =>
+            kw.toLowerCase().split(/\s+/).filter(w => w.length >= 4)
+              .some(w => t.includes(w))
+          );
         })
         .slice(0, 40)
         .map(j => mkJob({
@@ -991,6 +998,45 @@
           source: 'Arbeitnow', tags: j.tags || [],
         }));
     } catch(e) { console.warn('Arbeitnow:', e.message); return []; }
+  }
+
+  /* ── Remotive (free remote jobs, English) ── */
+  async function fetchRemotive() {
+    const titles = (APP.settings.jobTitles || 'software engineer')
+      .split(',').map(t => t.trim().toLowerCase());
+    const catMap = {
+      'software':'software-dev','developer':'software-dev','engineer':'software-dev',
+      'data':'software-dev','analyst':'software-dev','scientist':'software-dev',
+      'designer':'design','design':'design','ux':'design','ui':'design',
+      'product':'product','pm':'product','manager':'product',
+      'marketing':'marketing','growth':'marketing','content':'marketing',
+      'sales':'sales','account':'sales',
+      'finance':'finance','accounting':'finance',
+      'qa':'qa','test':'qa','quality':'qa',
+      'customer':'customer-support','support':'customer-support',
+    };
+    const cat = (() => {
+      for (const t of titles) {
+        for (const [kw, c] of Object.entries(catMap)) {
+          if (t.includes(kw)) return c;
+        }
+      }
+      return 'software-dev';
+    })();
+    try {
+      const res  = await fetch(`https://remotive.com/api/remote-jobs?category=${cat}&limit=30`);
+      const data = await res.json();
+      if (!data.jobs) return [];
+      return data.jobs
+        .filter(j => isWithin12h(j.publication_date))
+        .map(j => mkJob({
+          id: 'rem_' + j.id, title: j.title, company: j.company_name,
+          location: j.candidate_required_location || 'Remote',
+          url: j.url, salary: j.salary || '',
+          description: stripHtml(j.description),
+          postedAt: j.publication_date, source: 'Remotive', tags: j.tags || [],
+        }));
+    } catch(e) { console.warn('Remotive:', e.message); return []; }
   }
 
   /* ── Company badge quick-add ── */
@@ -1049,7 +1095,7 @@
   /* ── Apify / LinkedIn ── */
   // Actor ID is now configurable in Settings — falls back to default
   function linkedInSyncUrl() {
-    const actor = APP.settings.apifyLinkedInActor || 'bebity~linkedin-jobs-scraper';
+    const actor = APP.settings.apifyLinkedInActor || 'hireforce~linkedin-jobs-scraper';
     return `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items`;
   }
 
@@ -1298,8 +1344,8 @@
     showToast('Searching fresh jobs from the last 12 hours…', 4000);
 
     try {
-      const [r1, r2, r3, r4, r5] = await Promise.allSettled([
-        fetchRemoteOK(), fetchArbeitnow(), fetchAdzuna(),
+      const [r1, r2, r3, r4, r5, r6] = await Promise.allSettled([
+        fetchRemoteOK(), fetchArbeitnow(), fetchRemotive(), fetchAdzuna(),
         fetchApifyLinkedIn(), fetchApifyCareerPages()
       ]);
       const all = [
@@ -1308,6 +1354,7 @@
         ...(r3.status==='fulfilled' ? r3.value : []),
         ...(r4.status==='fulfilled' ? r4.value : []),
         ...(r5.status==='fulfilled' ? r5.value : []),
+        ...(r6.status==='fulfilled' ? r6.value : []),
       ];
       // Deduplicate by URL
       const seen = new Set();
@@ -1360,48 +1407,51 @@
     'dedicated','passionate','motivated','proven','demonstrated','strong'
   ]);
 
-  // Extract keywords purely from text — no hardcoded domain lists.
-  // Works for any role: engineering, PM, nursing, legal, finance, etc.
+  // Extract all keywords from free text (resume or JD body).
   function extractKeywords(text) {
     const lower = (text || '').toLowerCase().replace(/[^a-z0-9\s+#.\-\/&]/g, ' ');
-    const words  = lower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
-    const found  = new Set(words);
-
-    // Also extract bigrams (2-word phrases) so compound terms match:
-    // "product manager", "machine learning", "registered nurse", "tax law", etc.
+    const words = lower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+    const found = new Set(words);
     for (let i = 0; i < words.length - 1; i++) {
-      if (words[i].length >= 3 && words[i + 1].length >= 3) {
-        found.add(words[i] + ' ' + words[i + 1]);
-      }
+      if (words[i].length >= 3 && words[i+1].length >= 3)
+        found.add(words[i] + ' ' + words[i+1]);
     }
-
     return found;
   }
 
+  // Extract only the *meaningful* terms from a job posting:
+  // title words (always key) + description words that appear 2+ times (signal = requirement).
+  // Using this small set as the denominator avoids scoring against hundreds of boilerplate words.
+  function extractKeyTerms(title, desc, tags) {
+    const titleLower = (title || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+    const titleWords = titleLower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+    const keyTerms   = new Set(titleWords);
+    for (let i = 0; i < titleWords.length - 1; i++) {
+      if (titleWords[i].length >= 3 && titleWords[i+1].length >= 3)
+        keyTerms.add(titleWords[i] + ' ' + titleWords[i+1]);
+    }
+    const descFull = `${desc || ''} ${(tags||[]).join(' ')}`.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ');
+    const descWords = descFull.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+    const freq = {};
+    descWords.forEach(w => { freq[w] = (freq[w]||0) + 1; });
+    Object.entries(freq).forEach(([w, c]) => { if (c >= 2) keyTerms.add(w); });
+    return keyTerms;
+  }
+
   function scoreResumeVsJob(resume, job) {
-    // Weight job title 3× — strongest signal for relevance
-    const jobText   = `${job.title} ${job.title} ${job.title} ${job.description} ${(job.tags||[]).join(' ')}`;
-    const jobKws    = extractKeywords(jobText);
+    const keyTerms  = extractKeyTerms(job.title, job.description, job.tags);
     const resumeKws = extractKeywords(resume.text);
+    if (keyTerms.size === 0) return 50;
 
-    if (jobKws.size === 0) return 50;
+    const hits = [...keyTerms].filter(k => resumeKws.has(k)).length;
+    const base = Math.round((hits / keyTerms.size) * 80);
 
-    // Pure overlap: how much of the JD's vocabulary appears in the resume
-    const overlap  = [...jobKws].filter(k => resumeKws.has(k)).length;
-    const kwScore  = Math.round((overlap / jobKws.size) * 70);
+    // Remote jobs accessible to more people → slightly higher ceiling
+    const loc   = (job.location || '').toLowerCase();
+    const bonus = !loc || loc.includes('remote') ? 15 : 5;
 
-    // Title match: what fraction of title words appear in the resume (20 pts max)
-    const titleWords = (job.title || '').toLowerCase()
-      .split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
-    const titleHits  = titleWords.filter(w => resume.text.toLowerCase().includes(w)).length;
-    const titleBonus = titleWords.length > 0
-      ? Math.round((titleHits / titleWords.length) * 20) : 0;
-
-    // Location (10 pts max)
-    const loc      = (job.location || '').toLowerCase();
-    const locBonus = !loc || loc.includes('remote') ? 10 : 5;
-
-    return Math.min(99, kwScore + titleBonus + locBonus);
+    return Math.min(99, Math.max(5, base + bonus));
   }
 
   function bestResumeFor(job) {
