@@ -125,7 +125,7 @@
         </div>
         <h2 class="text-3xl font-bold text-slate-900 mb-3">Welcome to FreshFit</h2>
         <p class="text-slate-500 text-lg mb-8">
-          Upload your resume once. Get matched to fresh job postings (last 12 hours) with AI-tailored resumes that pass ATS scans.
+          Upload your resume once. Get matched to fresh job postings (last 24 hours) with AI-tailored resumes that pass ATS scans.
         </p>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10 text-left">
           <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
@@ -185,7 +185,7 @@
       <div id="jobs-empty" class="hidden text-center py-20">
         <div class="text-6xl mb-4">🔍</div>
         <h3 class="text-xl font-semibold text-slate-700 mb-2">No jobs found yet</h3>
-        <p class="text-slate-500 mb-6">Click "Find Jobs" to pull fresh postings from the last 12 hours.</p>
+        <p class="text-slate-500 mb-6">Click "Find Jobs" to pull fresh postings from the last 24 hours.</p>
         <button onclick="fetchJobs()"
           class="bg-teal-500 hover:bg-teal-600 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
           Find Fresh Jobs
@@ -297,12 +297,14 @@
             <label class="block text-sm font-medium mb-1">LinkedIn Scraper Actor ID
               <span class="text-slate-400 font-normal ml-1">— find working actors at apify.com/store → search "linkedin jobs"</span>
             </label>
-            <input id="s-linkedin-actor" type="text" placeholder="bebity~linkedin-jobs-scraper"
+            <input id="s-linkedin-actor" type="text" placeholder="hireforce~linkedin-jobs-scraper"
               class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
             <p class="text-xs text-slate-400 mt-1">
-              If you see "actor unavailable", the actor may need a paid plan. Try
-              <code class="bg-slate-100 px-1 rounded">curious_coder~linkedin-job-scraper</code> or
-              <code class="bg-slate-100 px-1 rounded">anchor~linkedin-jobs-scraper</code> instead.
+              The app automatically tries
+              <code class="bg-slate-100 px-1 rounded">hireforce~linkedin-jobs-scraper</code>,
+              <code class="bg-slate-100 px-1 rounded">curious_coder~linkedin-job-scraper</code>, and
+              <code class="bg-slate-100 px-1 rounded">anchor~linkedin-jobs-scraper</code> as fallbacks.
+              If all fail, search <a href="https://apify.com/store?search=linkedin+jobs" target="_blank" class="underline text-teal-600">apify.com/store</a> for a working actor and paste its ID here.
             </p>
           </div>
           <p id="apify-credit-warning" class="hidden mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -619,7 +621,7 @@
     adzunaAppKey:    '',
     adzunaCountry:   'us',
     apifyApiKey:          '',
-    apifyLinkedInActor:   'bebity~linkedin-jobs-scraper',
+    apifyLinkedInActor:   'hireforce~linkedin-jobs-scraper',
     targetCompanies:      '',
     careerCountry:   'us',
     jobTitles:       'Software Engineer, Frontend Developer',
@@ -891,7 +893,7 @@
   function populateSettingsForm() {
     const s = APP.settings;
     document.getElementById('s-apify-key').value        = s.apifyApiKey          || '';
-    document.getElementById('s-linkedin-actor').value   = s.apifyLinkedInActor  || 'bebity~linkedin-jobs-scraper';
+    document.getElementById('s-linkedin-actor').value   = s.apifyLinkedInActor  || 'hireforce~linkedin-jobs-scraper';
     document.getElementById('s-groq-key').value         = s.groqApiKey           || '';
     document.getElementById('s-target-companies').value = s.targetCompanies  || '';
     document.getElementById('s-career-country').value   = s.careerCountry    || 'us';
@@ -906,7 +908,7 @@
   function saveSettings() {
     APP.settings = {
       apifyApiKey:         document.getElementById('s-apify-key').value.trim(),
-      apifyLinkedInActor:  document.getElementById('s-linkedin-actor').value.trim() || 'bebity~linkedin-jobs-scraper',
+      apifyLinkedInActor:  document.getElementById('s-linkedin-actor').value.trim() || 'hireforce~linkedin-jobs-scraper',
       groqApiKey:          document.getElementById('s-groq-key').value.trim(),
       targetCompanies: document.getElementById('s-target-companies').value.trim(),
       careerCountry:   document.getElementById('s-career-country').value,
@@ -931,10 +933,17 @@
 
   function isWithin12h(raw) {
     if (!raw) return false;
-    const d = typeof raw === 'number' ? new Date(raw * 1000) : new Date(raw);
-    if (isNaN(d.getTime())) return false;
+    let d;
+    // Handle Unix timestamps (seconds if 9-10 digits, ms if 13 digits)
+    const n = Number(raw);
+    if (!isNaN(n) && n > 1e8) {
+      d = new Date(n < 1e12 ? n * 1000 : n);
+    } else {
+      d = new Date(raw);
+    }
+    if (isNaN(d.getTime())) return true; // unparseable → include
     const h = (Date.now() - d.getTime()) / 3_600_000;
-    return h >= 0 && h <= 12;
+    return h >= 0 && h <= 24; // 24h window for practical job volume
   }
 
   function mkJob({ id, title, company, location, url, salary, description, postedAt, source, tags }) {
@@ -979,7 +988,10 @@
         .filter(j => {
           if (!isWithin12h(j.created_at)) return false;
           const t = (j.title||'').toLowerCase();
-          return titles.some(kw => t.includes(kw.split(' ')[0]));
+          return titles.some(kw =>
+            kw.toLowerCase().split(/\s+/).filter(w => w.length >= 4)
+              .some(w => t.includes(w))
+          );
         })
         .slice(0, 40)
         .map(j => mkJob({
@@ -991,6 +1003,45 @@
           source: 'Arbeitnow', tags: j.tags || [],
         }));
     } catch(e) { console.warn('Arbeitnow:', e.message); return []; }
+  }
+
+  /* ── Remotive (free remote jobs, English) ── */
+  async function fetchRemotive() {
+    const titles = (APP.settings.jobTitles || 'software engineer')
+      .split(',').map(t => t.trim().toLowerCase());
+    const catMap = {
+      'software':'software-dev','developer':'software-dev','engineer':'software-dev',
+      'data':'software-dev','analyst':'software-dev','scientist':'software-dev',
+      'designer':'design','design':'design','ux':'design','ui':'design',
+      'product':'product','pm':'product','manager':'product',
+      'marketing':'marketing','growth':'marketing','content':'marketing',
+      'sales':'sales','account':'sales',
+      'finance':'finance','accounting':'finance',
+      'qa':'qa','test':'qa','quality':'qa',
+      'customer':'customer-support','support':'customer-support',
+    };
+    const cat = (() => {
+      for (const t of titles) {
+        for (const [kw, c] of Object.entries(catMap)) {
+          if (t.includes(kw)) return c;
+        }
+      }
+      return 'software-dev';
+    })();
+    try {
+      const res  = await fetch(`https://remotive.com/api/remote-jobs?category=${cat}&limit=30`);
+      const data = await res.json();
+      if (!data.jobs) return [];
+      return data.jobs
+        .filter(j => isWithin12h(j.publication_date))
+        .map(j => mkJob({
+          id: 'rem_' + j.id, title: j.title, company: j.company_name,
+          location: j.candidate_required_location || 'Remote',
+          url: j.url, salary: j.salary || '',
+          description: stripHtml(j.description),
+          postedAt: j.publication_date, source: 'Remotive', tags: j.tags || [],
+        }));
+    } catch(e) { console.warn('Remotive:', e.message); return []; }
   }
 
   /* ── Company badge quick-add ── */
@@ -1047,115 +1098,133 @@
   }
 
   /* ── Apify / LinkedIn ── */
-  // Actor ID is now configurable in Settings — falls back to default
-  function linkedInSyncUrl() {
-    const actor = APP.settings.apifyLinkedInActor || 'bebity~linkedin-jobs-scraper';
-    return `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items`;
-  }
 
-  // Friendly messages for specific Apify error conditions
+  // Known actors tried in order. 404 = actor not found → try next immediately.
+  // Any other error (timeout, 4xx, 5xx) = stop and show the real error message.
+  const LINKEDIN_ACTORS = [
+    'hireforce~linkedin-jobs-scraper',
+    'curious_coder~linkedin-job-scraper',
+    'anchor~linkedin-jobs-scraper',
+    'bebity~linkedin-jobs-scraper',
+  ];
+
   const APIFY_ERRORS = {
-    402: '⚠️ Apify credits exhausted — LinkedIn jobs paused until your monthly free credits reset. Check console.apify.com/billing.',
+    402: '⚠️ Apify credits exhausted — LinkedIn jobs paused until monthly credits reset. See console.apify.com/billing.',
     401: '🔑 Apify API token is invalid. Check Settings → paste the correct token.',
     429: '⏳ Apify rate limit hit — wait a minute and try again.',
     timeout: '⏱️ LinkedIn scrape timed out. Apify is busy — try again in a moment.',
-    actor: '🔧 LinkedIn scraper actor unavailable on Apify. Try again later.',
   };
 
   async function fetchApifyLinkedIn() {
     const token = APP.settings.apifyApiKey;
     if (!token) return [];
 
-    // Hide any previous credit warning
     document.getElementById('apify-credit-warning')?.classList.add('hidden');
 
     const titles   = (APP.settings.jobTitles || 'software engineer')
       .split(',').map(t => t.trim()).filter(Boolean);
     const location = APP.settings.location || '';
 
-    // Build one search query per title (max 3 to stay within free limits)
+    // Build LinkedIn search URLs — most actors accept startUrls regardless of schema
+    const startUrls = titles.slice(0, 3).map(title => {
+      const p = new URLSearchParams({ keywords: title, f_TPR: 'r86400' });
+      if (location && !location.toLowerCase().includes('remote')) p.set('location', location);
+      else p.set('f_WT', '2'); // remote work filter
+      return { url: `https://www.linkedin.com/jobs/search/?${p}` };
+    });
+
+    // Also send keyword fields — some actors ignore startUrls and prefer these
     const searchQueries = titles.slice(0, 3).map(q => ({
       query: location ? `${q} ${location}` : q,
+      keyword: q,
+      location: location || 'Worldwide',
     }));
 
-    let res;
-    try {
-      res = await fetch(
-        `${linkedInSyncUrl()}?token=${encodeURIComponent(token)}&timeout=90&memory=256`,
-        {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            searchQueries,
-            datePosted:  'Past 24 hours', // LinkedIn only offers 24h minimum; we filter to 12h below
-            maxResults:  40,
-            scrapeCompany:     false,
-            scrapeJobDetails:  true,
-          }),
-        }
-      );
-    } catch (netErr) {
-      console.warn('Apify network error:', netErr.message);
-      showToast('LinkedIn (Apify): network error — skipped.', 4000);
-      return [];
-    }
+    const body = {
+      startUrls,
+      searchQueries,
+      searchKeywords: titles[0] || '',
+      location,
+      datePosted:      'Past 24 hours',
+      maxItems:        40,
+      maxResults:      40,
+      scrapeJobDetails: true,
+      scrapeCompany:    false,
+    };
 
-    // ── Error handling by status code ──
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
+    // Try configured actor first, then fallbacks (404 = not found, skip to next)
+    const configured = APP.settings.apifyLinkedInActor || LINKEDIN_ACTORS[0];
+    const queue = [configured, ...LINKEDIN_ACTORS.filter(a => a !== configured)];
 
+    for (const actor of queue) {
+      let res;
+      try {
+        res = await fetch(
+          `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/run-sync-get-dataset-items` +
+          `?token=${encodeURIComponent(token)}&timeout=90&memory=256`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        );
+      } catch (netErr) {
+        console.warn(`Apify (${actor}) network error:`, netErr.message);
+        showToast('LinkedIn (Apify): network error — skipped.', 4000);
+        return [];
+      }
+
+      // Shared credit/auth errors — stop immediately, no point trying other actors
       if (res.status === 402) {
-        // Credits exhausted — show persistent warning in Settings
         document.getElementById('apify-credit-warning')?.classList.remove('hidden');
-        showToast(APIFY_ERRORS[402], 6000);
-        return [];
+        showToast(APIFY_ERRORS[402], 6000); return [];
       }
-      if (res.status === 401) {
-        showToast(APIFY_ERRORS[401], 5000);
-        return [];
-      }
-      if (res.status === 429) {
-        showToast(APIFY_ERRORS[429], 5000);
-        return [];
-      }
-      // Actor not found or 5xx
-      const msg = body?.error?.message || '';
-      if (msg.toLowerCase().includes('actor') || res.status === 404) {
-        showToast(APIFY_ERRORS.actor, 5000);
-      } else if (res.status === 408 || msg.toLowerCase().includes('timeout')) {
-        showToast(APIFY_ERRORS.timeout, 5000);
-      } else {
-        showToast(`LinkedIn (Apify): error ${res.status} — ${msg || 'skipped'}.`, 5000);
-      }
-      console.warn('Apify error:', res.status, body);
-      return [];
-    }
+      if (res.status === 401) { showToast(APIFY_ERRORS[401], 5000); return []; }
+      if (res.status === 429) { showToast(APIFY_ERRORS[429], 5000); return []; }
 
-    // ── Parse results ──
-    let data;
-    try { data = await res.json(); } catch { return []; }
-    if (!Array.isArray(data)) return [];
+      // Actor not found → try the next one silently
+      if (res.status === 404) {
+        console.warn(`Apify actor "${actor}" not found — trying next.`);
+        continue;
+      }
 
-    return data
-      .filter(j => j && j.title)
-      .filter(j => {
-        // Apify returns postedAt as ISO string or relative; best-effort 12h filter
-        const raw = j.postedAt || j.datePosted || j.publishedAt || '';
-        if (!raw) return true; // include if no date info
-        return isWithin12h(raw);
-      })
-      .map(j => mkJob({
-        id:          'li_' + (j.id || j.jobId || Math.random().toString(36).slice(2)),
-        title:       j.title,
-        company:     j.companyName || j.company || '',
-        location:    j.location    || '',
-        url:         j.jobUrl      || j.url || '',
-        salary:      j.salary      || j.salaryRange || '',
-        description: stripHtml(j.description || j.descriptionHtml || ''),
-        postedAt:    j.postedAt    || j.datePosted || new Date().toISOString(),
-        source:      'LinkedIn',
-        tags:        j.skills      || [],
-      }));
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        const msg = errBody?.error?.message || '';
+        if (res.status === 408 || msg.toLowerCase().includes('timeout')) {
+          showToast(APIFY_ERRORS.timeout, 5000);
+        } else {
+          showToast(`LinkedIn (Apify) actor "${actor}" — error ${res.status}${msg ? ': ' + msg : ''}. Try a different actor in Settings.`, 8000);
+        }
+        console.warn(`Apify (${actor}) error:`, res.status, errBody);
+        return [];
+      }
+
+      // ── Success — parse results ──
+      let data;
+      try { data = await res.json(); } catch { return []; }
+      if (!Array.isArray(data)) return [];
+
+      return data
+        .filter(j => j && j.title)
+        .filter(j => {
+          const raw = j.postedAt || j.datePosted || j.publishedAt || '';
+          if (!raw) return true;
+          return isWithin12h(raw);
+        })
+        .map(j => mkJob({
+          id:          'li_' + (j.id || j.jobId || Math.random().toString(36).slice(2)),
+          title:       j.title,
+          company:     j.companyName || j.company || '',
+          location:    j.location    || '',
+          url:         j.jobUrl      || j.url || '',
+          salary:      j.salary      || j.salaryRange || '',
+          description: stripHtml(j.description || j.descriptionHtml || ''),
+          postedAt:    j.postedAt    || j.datePosted || new Date().toISOString(),
+          source:      'LinkedIn',
+          tags:        j.skills      || [],
+        }));
+    } // end for-loop
+
+    // All actors in the queue returned 404 — none are available
+    showToast('🔧 No LinkedIn actor available. Go to Settings → update the LinkedIn Actor ID with one from apify.com/store (search "linkedin jobs").', 9000);
+    return [];
   }
 
   /* ── Apify / Company Career Pages (Google Jobs scraper) ── */
@@ -1295,11 +1364,11 @@
     const icon = document.getElementById('fetch-icon');
     btn.disabled = true; btn.classList.add('opacity-70');
     icon.classList.add('animate-spin');
-    showToast('Searching fresh jobs from the last 12 hours…', 4000);
+    showToast('Searching fresh jobs from the last 24 hours…', 4000);
 
     try {
-      const [r1, r2, r3, r4, r5] = await Promise.allSettled([
-        fetchRemoteOK(), fetchArbeitnow(), fetchAdzuna(),
+      const [r1, r2, r3, r4, r5, r6] = await Promise.allSettled([
+        fetchRemoteOK(), fetchArbeitnow(), fetchRemotive(), fetchAdzuna(),
         fetchApifyLinkedIn(), fetchApifyCareerPages()
       ]);
       const all = [
@@ -1308,6 +1377,7 @@
         ...(r3.status==='fulfilled' ? r3.value : []),
         ...(r4.status==='fulfilled' ? r4.value : []),
         ...(r5.status==='fulfilled' ? r5.value : []),
+        ...(r6.status==='fulfilled' ? r6.value : []),
       ];
       // Deduplicate by URL
       const seen = new Set();
@@ -1329,7 +1399,7 @@
       renderDashboard();
       showToast(unique.length
         ? `Found ${unique.length} fresh job${unique.length!==1?'s':''}!`
-        : 'No jobs posted in the last 12 h. Try adding more keywords in Settings.');
+        : 'No jobs posted in the last 24 h. Try adding more keywords in Settings.');
     } catch(e) {
       showToast('Fetch error — check your connection.');
       console.error(e);
@@ -1360,48 +1430,88 @@
     'dedicated','passionate','motivated','proven','demonstrated','strong'
   ]);
 
-  // Extract keywords purely from text — no hardcoded domain lists.
-  // Works for any role: engineering, PM, nursing, legal, finance, etc.
   function extractKeywords(text) {
     const lower = (text || '').toLowerCase().replace(/[^a-z0-9\s+#.\-\/&]/g, ' ');
-    const words  = lower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
-    const found  = new Set(words);
-
-    // Also extract bigrams (2-word phrases) so compound terms match:
-    // "product manager", "machine learning", "registered nurse", "tax law", etc.
+    const words = lower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+    const found = new Set(words);
     for (let i = 0; i < words.length - 1; i++) {
-      if (words[i].length >= 3 && words[i + 1].length >= 3) {
-        found.add(words[i] + ' ' + words[i + 1]);
-      }
+      if (words[i].length >= 3 && words[i+1].length >= 3)
+        found.add(words[i] + ' ' + words[i+1]);
     }
-
     return found;
   }
 
+  // Isolate the core role from a job title by stripping domain qualifiers.
+  // "Product Manager - Renewable Energy Platform (AI-Native) (m/w/d)" → "product manager"
+  // "Senior Software Engineer | FinTech"                               → "senior software engineer"
+  function extractCoreRole(title) {
+    const noParens = (title || '').replace(/\s*\([^)]*\)/g, '').trim();
+    const core     = noParens.split(/\s*[\-–|,\/]\s*/)[0].trim();
+    const noAt     = core.replace(/\s+at\s+.*/i, '').trim();
+    return (noAt.length >= 4 ? noAt : noParens).toLowerCase();
+  }
+
+  // Try to extract just the requirements/qualifications section from a JD.
+  // Falls back to the full description if no clear section header is found.
+  function extractRequirementsSection(desc) {
+    if (!desc || desc.length < 100) return desc || '';
+    const REQ_START = /\b(requirements?|qualifications?|what (you('re?| are?) |we'?re? )looking for|you (should|must|will) have|skills? (needed|required)|minimum qualifications?|preferred qualifications?|about you|what you bring|your background|your profile)\b/i;
+    const REQ_END   = /\b(about (us|the company|our company|this role|the role|the team)|what (you'?ll?|you will) (do|be doing|build|own)|key responsibilities|responsibilities|nice to have|benefits?|perks|compensation|salary|who we are|our (company|team|culture|mission))\b/i;
+    const startIdx  = desc.search(REQ_START);
+    if (startIdx === -1) return desc;
+    const after  = desc.slice(startIdx);
+    const endIdx = after.search(REQ_END);
+    const section = endIdx > 80 ? after.slice(0, endIdx) : after;
+    return section.length > 120 ? section : desc;
+  }
+
   function scoreResumeVsJob(resume, job) {
-    // Weight job title 3× — strongest signal for relevance
-    const jobText   = `${job.title} ${job.title} ${job.title} ${job.description} ${(job.tags||[]).join(' ')}`;
-    const jobKws    = extractKeywords(jobText);
     const resumeKws = extractKeywords(resume.text);
 
-    if (jobKws.size === 0) return 50;
+    // ── 1. Core role match (60 pts) ──
+    // Strip domain qualifiers so "Product Manager - Renewable Energy" scores the
+    // same core-role points as a plain "Product Manager" posting.
+    const coreLower   = extractCoreRole(job.title);
+    const coreWords   = coreLower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+    const coreBigrams = [];
+    for (let i = 0; i < coreWords.length - 1; i++) {
+      if (coreWords[i].length >= 3 && coreWords[i+1].length >= 3)
+        coreBigrams.push(coreWords[i] + ' ' + coreWords[i+1]);
+    }
+    const uniScore = coreWords.length > 0
+      ? coreWords.filter(w => resumeKws.has(w)).length / coreWords.length : 0;
+    const biScore  = coreBigrams.length > 0
+      ? coreBigrams.filter(b => resumeKws.has(b)).length / coreBigrams.length
+      : uniScore;
+    // Phrase match (bigram) is stronger signal than individual word match
+    const coreScore = uniScore * 0.4 + biScore * 0.6;
 
-    // Pure overlap: how much of the JD's vocabulary appears in the resume
-    const overlap  = [...jobKws].filter(k => resumeKws.has(k)).length;
-    const kwScore  = Math.round((overlap / jobKws.size) * 70);
+    // ── 2. Requirements/qualifications match (30 pts) ──
+    // Prefer the requirements section so company boilerplate, duties, and
+    // benefits don't dilute the score. Fall back to high-frequency desc words.
+    const reqText = extractRequirementsSection(job.description || '');
+    let reqScore  = 0;
+    if (reqText !== (job.description || '') && reqText.length > 120) {
+      const reqKws = extractKeywords(reqText);
+      reqScore = reqKws.size > 0
+        ? [...reqKws].filter(k => resumeKws.has(k)).length / reqKws.size : 0;
+    } else {
+      const dWords = (job.description || '').toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+        .filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+      const freq = {};
+      dWords.forEach(w => { freq[w] = (freq[w]||0) + 1; });
+      const freqKws = Object.keys(freq).filter(w => freq[w] >= 2);
+      reqScore = freqKws.length > 0
+        ? freqKws.filter(w => resumeKws.has(w)).length / freqKws.length : 0;
+    }
 
-    // Title match: what fraction of title words appear in the resume (20 pts max)
-    const titleWords = (job.title || '').toLowerCase()
-      .split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
-    const titleHits  = titleWords.filter(w => resume.text.toLowerCase().includes(w)).length;
-    const titleBonus = titleWords.length > 0
-      ? Math.round((titleHits / titleWords.length) * 20) : 0;
+    // ── 3. Remote bonus (10 pts) ──
+    const locAll   = ((job.location||'') + ' ' + (job.tags||[]).join(' ')).toLowerCase();
+    const locBonus = locAll.includes('remote') ? 10 : 0;
 
-    // Location (10 pts max)
-    const loc      = (job.location || '').toLowerCase();
-    const locBonus = !loc || loc.includes('remote') ? 10 : 5;
-
-    return Math.min(99, kwScore + titleBonus + locBonus);
+    const base = Math.round(coreScore * 60 + reqScore * 30);
+    return Math.min(99, Math.max(5, base + locBonus));
   }
 
   function bestResumeFor(job) {
