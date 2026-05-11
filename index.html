@@ -293,6 +293,18 @@
               class="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
             <button onclick="toggleApifyKey()" class="text-xs border border-slate-200 px-3 rounded-lg hover:bg-slate-50 text-slate-500">Show</button>
           </div>
+          <div class="mt-3">
+            <label class="block text-sm font-medium mb-1">LinkedIn Scraper Actor ID
+              <span class="text-slate-400 font-normal ml-1">— find working actors at apify.com/store → search "linkedin jobs"</span>
+            </label>
+            <input id="s-linkedin-actor" type="text" placeholder="bebity~linkedin-jobs-scraper"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            <p class="text-xs text-slate-400 mt-1">
+              If you see "actor unavailable", the actor may need a paid plan. Try
+              <code class="bg-slate-100 px-1 rounded">curious_coder~linkedin-job-scraper</code> or
+              <code class="bg-slate-100 px-1 rounded">anchor~linkedin-jobs-scraper</code> instead.
+            </p>
+          </div>
           <p id="apify-credit-warning" class="hidden mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             ⚠️ Apify credits exhausted — LinkedIn jobs paused until your monthly credits reset.
             <a href="https://console.apify.com/billing" target="_blank" class="underline ml-1">Check billing →</a>
@@ -330,6 +342,24 @@
               <option value="sg">Singapore</option>
             </select>
           </div>
+        </div>
+
+        <!-- PIN Protection -->
+        <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+          <h3 class="font-semibold text-lg mb-1">App PIN <span class="text-slate-400 font-normal text-sm">(optional — for shared devices)</span></h3>
+          <p class="text-sm text-slate-500 mb-1">
+            Your data is already private — it only exists in <em>this browser</em>. A PIN adds a lock screen for shared computers.
+          </p>
+          <p class="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+            ⚠️ If you forget your PIN, clear your browser's localStorage to reset (this also clears your resumes and jobs).
+          </p>
+          <div class="flex gap-2">
+            <input id="s-pin-new" type="password" maxlength="20" placeholder="Set a new PIN"
+              class="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            <button onclick="setPin()" class="bg-teal-500 text-white text-sm font-medium px-4 rounded-lg hover:bg-teal-600 transition-colors">Set PIN</button>
+            <button onclick="clearPin()" class="border border-slate-200 text-slate-600 text-sm font-medium px-4 rounded-lg hover:bg-slate-50 transition-colors">Clear PIN</button>
+          </div>
+          <p id="pin-set-status" class="text-xs text-teal-600 mt-2 hidden"></p>
         </div>
 
         <div class="flex items-center gap-4">
@@ -539,6 +569,25 @@
   </div>
 
   <!-- ═══════════════════════════════════════════
+       PIN LOCK SCREEN
+  ═══════════════════════════════════════════ -->
+  <div id="pin-screen" class="hidden fixed inset-0 bg-slate-900 z-[99999] flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
+      <div class="w-14 h-14 bg-teal-500 rounded-xl flex items-center justify-center mx-auto mb-4 text-white font-bold text-2xl">F</div>
+      <h2 class="text-xl font-bold text-slate-900 mb-1">FreshFit</h2>
+      <p class="text-sm text-slate-500 mb-6">Enter your PIN to unlock</p>
+      <input id="pin-input" type="password" maxlength="20" placeholder="Enter PIN"
+        onkeydown="if(event.key==='Enter') checkPin()"
+        class="w-full border border-slate-200 rounded-lg px-4 py-3 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-teal-400 mb-3" />
+      <p id="pin-error" class="hidden text-xs text-red-500 mb-3">Incorrect PIN — try again.</p>
+      <button onclick="checkPin()"
+        class="w-full bg-teal-500 hover:bg-teal-600 text-white font-semibold py-3 rounded-xl transition-colors">
+        Unlock
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
        TOAST NOTIFICATION
   ═══════════════════════════════════════════ -->
   <div id="toast" class="fixed bottom-6 right-6 z-[9998] pointer-events-none">
@@ -569,8 +618,9 @@
     adzunaAppId:     '',
     adzunaAppKey:    '',
     adzunaCountry:   'us',
-    apifyApiKey:     '',
-    targetCompanies: '',
+    apifyApiKey:          '',
+    apifyLinkedInActor:   'bebity~linkedin-jobs-scraper',
+    targetCompanies:      '',
     careerCountry:   'us',
     jobTitles:       'Software Engineer, Frontend Developer',
     location:        'Remote',
@@ -840,8 +890,9 @@
 
   function populateSettingsForm() {
     const s = APP.settings;
-    document.getElementById('s-apify-key').value        = s.apifyApiKey      || '';
-    document.getElementById('s-groq-key').value         = s.groqApiKey       || '';
+    document.getElementById('s-apify-key').value        = s.apifyApiKey          || '';
+    document.getElementById('s-linkedin-actor').value   = s.apifyLinkedInActor  || 'bebity~linkedin-jobs-scraper';
+    document.getElementById('s-groq-key').value         = s.groqApiKey           || '';
     document.getElementById('s-target-companies').value = s.targetCompanies  || '';
     document.getElementById('s-career-country').value   = s.careerCountry    || 'us';
     renderCompanyBadges();
@@ -854,8 +905,9 @@
 
   function saveSettings() {
     APP.settings = {
-      apifyApiKey:     document.getElementById('s-apify-key').value.trim(),
-      groqApiKey:      document.getElementById('s-groq-key').value.trim(),
+      apifyApiKey:         document.getElementById('s-apify-key').value.trim(),
+      apifyLinkedInActor:  document.getElementById('s-linkedin-actor').value.trim() || 'bebity~linkedin-jobs-scraper',
+      groqApiKey:          document.getElementById('s-groq-key').value.trim(),
       targetCompanies: document.getElementById('s-target-companies').value.trim(),
       careerCountry:   document.getElementById('s-career-country').value,
       adzunaAppId:   document.getElementById('s-adzuna-id').value.trim(),
@@ -995,8 +1047,11 @@
   }
 
   /* ── Apify / LinkedIn ── */
-  const APIFY_ACTOR    = 'bebity~linkedin-jobs-scraper';
-  const APIFY_SYNC_URL = `https://api.apify.com/v2/acts/${APIFY_ACTOR}/run-sync-get-dataset-items`;
+  // Actor ID is now configurable in Settings — falls back to default
+  function linkedInSyncUrl() {
+    const actor = APP.settings.apifyLinkedInActor || 'bebity~linkedin-jobs-scraper';
+    return `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items`;
+  }
 
   // Friendly messages for specific Apify error conditions
   const APIFY_ERRORS = {
@@ -1026,7 +1081,7 @@
     let res;
     try {
       res = await fetch(
-        `${APIFY_SYNC_URL}?token=${encodeURIComponent(token)}&timeout=90&memory=256`,
+        `${linkedInSyncUrl()}?token=${encodeURIComponent(token)}&timeout=90&memory=256`,
         {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1288,49 +1343,101 @@
   // TASK 8 — FIT SCORING
   // ═══════════════════════════════════════════════════
 
-  const TECH_KW = new Set([
-    'javascript','typescript','python','java','c++','c#','go','golang','rust','ruby','php',
-    'swift','kotlin','scala','r','matlab','html','css','sass','less',
+  // ── Stop words filtered out of keyword extraction ──
+  const STOP_WORDS = new Set([
+    'that','with','from','have','will','your','their','been','into','more',
+    'also','than','when','each','such','both','about','work','role','using',
+    'able','well','make','good','strong','experience','required','preferred',
+    'looking','seeking','must','should','would','could','team','company',
+    'position','opportunity','candidate','applicant','join','help','build',
+    'drive','lead','manage','ensure','provide','support','working','excellent',
+    'great','highly','apply','years','across','within','through','while',
+    'this','these','those','they','them','there','here','where','some','many',
+    'most','other','time','very','just','only','even','back','being','having',
+    'doing','going','over','under','between','after','before','part','new',
+    'high','help','take','need','create','develop','define','own','skills',
+    'ability','knowledge','understanding','key','plus','including','related'
+  ]);
+
+  // ── Known domain keywords (multi-word phrases + single words) ──
+  const DOMAIN_KW = new Set([
+    // Engineering
+    'javascript','typescript','python','java','c++','c#','go','golang','rust',
+    'ruby','php','swift','kotlin','scala','html','css','sass','less',
     'react','vue','angular','svelte','nextjs','next.js','nuxt','gatsby','remix',
     'node','nodejs','express','fastapi','django','flask','rails','spring','laravel',
     'sql','postgresql','postgres','mysql','sqlite','mongodb','redis','elasticsearch',
     'dynamodb','firebase','supabase','prisma','graphql','rest','grpc','websocket',
-    'aws','azure','gcp','cloud','docker','kubernetes','k8s','terraform','ansible',
-    'ci/cd','jenkins','github actions','gitlab','devops','linux','bash','shell',
-    'machine learning','ml','ai','deep learning','nlp','llm','tensorflow','pytorch',
+    'aws','azure','gcp','docker','kubernetes','k8s','terraform','ansible',
+    'ci/cd','devops','linux','bash','shell','git','testing','jest','cypress',
+    'microservices','serverless','api','backend','frontend','fullstack',
+    // AI / Data
+    'machine learning','deep learning','nlp','llm','tensorflow','pytorch',
     'pandas','numpy','spark','kafka','airflow','dbt','etl','data pipeline',
-    'agile','scrum','kanban','git','testing','jest','cypress','selenium','unit test',
-    'microservices','serverless','api','backend','frontend','fullstack','full-stack',
-    'figma','ux','ui','product','leadership','communication','mentoring',
+    'tableau','looker','power bi','amplitude','mixpanel','segment','metabase',
+    'regression','classification','clustering','prediction','analytics',
+    // Product Management
+    'product manager','product management','product strategy','product roadmap',
+    'roadmap','stakeholder','stakeholders','okr','kpi','north star','metrics',
+    'prioritization','discovery','user research','customer interviews','personas',
+    'user journey','go-to-market','gtm','product launch','positioning','competitive',
+    'revenue','growth','retention','engagement','activation','conversion','funnel',
+    'backlog','sprint','grooming','retrospective','prd','requirements',
+    'a/b testing','experimentation','hypothesis','prototype','wireframe',
+    'cross-functional','alignment','executive','narrative','business case',
+    // Design / UX
+    'figma','sketch','invision','zeplin','framer','principle',
+    'ux','ui','user experience','interaction design','visual design',
+    'design system','accessibility','usability','typography','branding',
+    'user testing','heuristic','information architecture',
+    // Marketing / Growth
+    'seo','sem','ppc','content marketing','email marketing','social media',
+    'demand generation','lead generation','pipeline','attribution','conversion rate',
+    'brand','campaign','copywriting','content strategy','influencer',
+    // Operations / Business
+    'operations','process improvement','efficiency','automation','procurement',
+    'budget','forecasting','planning','vendor','compliance','governance','policy',
+    'p&l','revenue','ebitda','cost reduction','strategic planning',
+    // Soft/General
+    'agile','scrum','kanban','leadership','communication','mentoring','coaching',
+    'collaboration','presentation','stakeholder management',
   ]);
 
-  function kwSet(text) {
+  // Extract ALL meaningful words from text (role-agnostic)
+  function extractKeywords(text) {
     const lower = (text || '').toLowerCase();
     const found = new Set();
-    TECH_KW.forEach(kw => { if (lower.includes(kw)) found.add(kw); });
-    // Also pick up capitalised tokens (likely tech names)
-    const caps = lower.match(/\b[a-z][a-z0-9.#+-]{2,}\b/g) || [];
-    caps.forEach(t => found.add(t));
+    // Single words
+    lower.replace(/[^a-z0-9\s+#.\-\/&]/g,' ').split(/\s+/)
+      .filter(w => w.length >= 3 && !STOP_WORDS.has(w))
+      .forEach(w => found.add(w));
+    // Multi-word domain phrases
+    DOMAIN_KW.forEach(kw => { if (lower.includes(kw)) found.add(kw); });
     return found;
   }
 
   function scoreResumeVsJob(resume, job) {
-    const jobText    = `${job.title} ${job.description} ${(job.tags||[]).join(' ')}`;
-    const jobKws     = kwSet(jobText);
-    const resumeKws  = kwSet(resume.text);
+    // Weight job title double — it's the strongest signal
+    const jobText    = `${job.title} ${job.title} ${job.description} ${(job.tags||[]).join(' ')}`;
+    const jobKws     = extractKeywords(jobText);
+    const resumeKws  = extractKeywords(resume.text);
 
-    if (jobKws.size === 0) return 50; // no signals, neutral
+    if (jobKws.size === 0) return 50;
 
-    const overlap    = [...jobKws].filter(k => resumeKws.has(k)).length;
-    const kwScore    = Math.round((overlap / jobKws.size) * 65);
+    // Keyword overlap (70 pts max)
+    const overlap  = [...jobKws].filter(k => resumeKws.has(k)).length;
+    const kwScore  = Math.round((overlap / jobKws.size) * 70);
 
-    // Title bonus — does the resume mention any word from the job title?
-    const titleWords = (job.title || '').toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    const titleBonus = titleWords.some(w => resume.text.toLowerCase().includes(w)) ? 20 : 0;
+    // Title match: what fraction of title words appear in resume (20 pts max)
+    const titleWords = (job.title || '').toLowerCase()
+      .split(/\s+/).filter(w => w.length > 3 && !STOP_WORDS.has(w));
+    const titleHits  = titleWords.filter(w => resume.text.toLowerCase().includes(w)).length;
+    const titleBonus = titleWords.length > 0
+      ? Math.round((titleHits / titleWords.length) * 20) : 0;
 
-    // Location bonus — remote or matching location
-    const loc        = (job.location || '').toLowerCase();
-    const locBonus   = loc.includes('remote') || loc === '' ? 10 : 5;
+    // Location (10 pts max)
+    const loc      = (job.location || '').toLowerCase();
+    const locBonus = !loc || loc.includes('remote') ? 10 : 5;
 
     return Math.min(99, kwScore + titleBonus + locBonus);
   }
@@ -1780,9 +1887,64 @@ TAILORED RESUME:`;
     }
   });
 
+  // ═══════════════════════════════════════════════════
+  // PIN PROTECTION
+  // ═══════════════════════════════════════════════════
+
+  async function hashPin(pin) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+
+  async function setPin() {
+    const pin = document.getElementById('s-pin-new').value.trim();
+    if (!pin) { showToast('Enter a PIN first.'); return; }
+    const hash = await hashPin(pin);
+    localStorage.setItem('ff_pin_hash', hash);
+    document.getElementById('s-pin-new').value = '';
+    const st = document.getElementById('pin-set-status');
+    st.textContent = '✓ PIN set — you\'ll be asked for it next time you open the app.';
+    st.classList.remove('hidden');
+    showToast('PIN set successfully!');
+  }
+
+  function clearPin() {
+    localStorage.removeItem('ff_pin_hash');
+    const st = document.getElementById('pin-set-status');
+    st.textContent = '✓ PIN cleared — app is now unlocked.';
+    st.classList.remove('hidden');
+    showToast('PIN cleared.');
+  }
+
+  async function checkPin() {
+    const input = document.getElementById('pin-input').value;
+    const stored = localStorage.getItem('ff_pin_hash');
+    if (!stored) { hidePinScreen(); return; }
+    const hash = await hashPin(input);
+    if (hash === stored) {
+      hidePinScreen();
+    } else {
+      document.getElementById('pin-error').classList.remove('hidden');
+      document.getElementById('pin-input').value = '';
+      document.getElementById('pin-input').focus();
+    }
+  }
+
+  function hidePinScreen() {
+    document.getElementById('pin-screen').classList.add('hidden');
+  }
+
   /* ── Init ── */
   function init() {
     loadPersistedState();
+
+    // Show PIN screen if one is set
+    const pinHash = localStorage.getItem('ff_pin_hash');
+    if (pinHash) {
+      document.getElementById('pin-screen').classList.remove('hidden');
+      document.getElementById('pin-input').focus();
+      return; // app shown after successful PIN entry
+    }
 
     if (APP.resumes.length === 0) {
       showView('setup');
@@ -1790,6 +1952,13 @@ TAILORED RESUME:`;
       showView('dashboard');
       if (APP.jobs.length === 0) fetchJobs();
     }
+  }
+
+  // Called after PIN is successfully entered
+  function hidePinScreen() {
+    document.getElementById('pin-screen').classList.add('hidden');
+    if (APP.resumes.length === 0) showView('setup');
+    else { showView('dashboard'); if (APP.jobs.length === 0) fetchJobs(); }
   }
 
   init();
