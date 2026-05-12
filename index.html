@@ -1355,6 +1355,50 @@
     return results;
   }
 
+  /* ── Location matching: returns false only when job is clearly in a different country ── */
+  function isLocationMatch(jobLoc, configuredLoc) {
+    if (!configuredLoc) return true;
+    const c = configuredLoc.toLowerCase().trim();
+    if (!c || c === 'remote') return true;
+
+    const j = (jobLoc || '').toLowerCase();
+    // Remote/worldwide/anywhere jobs are valid for any country filter
+    if (!j || /\b(remote|worldwide|anywhere|global)\b/.test(j)) return true;
+
+    // ── US ──
+    if (/\b(united states|u\.?s\.?a?\.?|america)\b/.test(c)) {
+      if (/\b(united states|u\.?s\.?a?\.?|america)\b/.test(j)) return true;
+      if (/\b(new york|san francisco|los angeles|chicago|seattle|boston|austin|denver|atlanta|miami|dallas|houston|phoenix|philadelphia|portland|minneapolis|san jose|washington|baltimore|las vegas|sacramento|nashville|raleigh|charlotte|columbus|indianapolis|detroit|new jersey|brooklyn|manhattan)\b/i.test(j)) return true;
+      if (/,\s*(al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy)(\b|$)/i.test(j)) return true;
+      if (/\b(germany|deutschland|france|spain|italy|india|china|brazil|australia|canada|mexico|netherlands|belgium|sweden|norway|denmark|finland|austria|switzerland|poland|portugal|czech|romania|hungary|ukraine|russia|japan|south korea|singapore|hong kong|new zealand|south africa|argentina|colombia|chile|united kingdom|britain|england|ireland|scotland|turkey|israel|uae|dubai|saudi|vietnam|thailand|philippines|indonesia|malaysia|taiwan|berlin|munich|hamburg|amsterdam|rotterdam|london|paris|madrid|barcelona|rome|milan|tokyo|seoul|bangalore|mumbai|delhi|hyderabad|toronto|montreal|vancouver|sydney|melbourne|cape town)\b/i.test(j)) return false;
+      return true; // no clear non-US country — include
+    }
+
+    // ── UK ──
+    if (/\b(united kingdom|u\.k\.?|^uk$|britain)\b/.test(c)) {
+      if (/\b(united kingdom|u\.k\.?|britain|england|scotland|wales|london|manchester|birmingham|leeds|glasgow|edinburgh|bristol|liverpool|sheffield|cardiff)\b/i.test(j)) return true;
+      if (/\b(germany|france|spain|italy|india|china|brazil|australia|canada|mexico|united states|usa|u\.s\.|japan|singapore)\b/i.test(j)) return false;
+      return true;
+    }
+
+    // ── Canada ──
+    if (/\bcanada\b/.test(c)) {
+      if (/\b(canada|toronto|vancouver|montreal|calgary|ottawa|edmonton|winnipeg|quebec|ontario|british columbia|alberta)\b/i.test(j)) return true;
+      if (/\b(germany|france|spain|italy|india|china|brazil|australia|mexico|united states|usa|u\.s\.|united kingdom|uk)\b/i.test(j)) return false;
+      return true;
+    }
+
+    // ── Australia ──
+    if (/\baustralia\b/.test(c)) {
+      if (/\b(australia|sydney|melbourne|brisbane|perth|adelaide|canberra|nsw|victoria|queensland)\b/i.test(j)) return true;
+      if (/\b(germany|france|spain|italy|india|china|brazil|canada|mexico|united states|usa|u\.s\.|united kingdom|uk)\b/i.test(j)) return false;
+      return true;
+    }
+
+    // Generic: direct substring match against first part of configured location
+    return j.includes(c) || j.includes(c.split(',')[0].trim());
+  }
+
   /* ── Orchestrate ── */
   async function fetchJobs() {
     if (APP.resumes.length === 0) {
@@ -1385,21 +1429,26 @@
         if (!j.url || seen.has(j.url)) return false;
         seen.add(j.url); return true;
       });
+      // Location filter: drop jobs clearly from a different country
+      const configuredLoc = APP.settings.location || '';
+      const locationFiltered = (configuredLoc && configuredLoc.toLowerCase() !== 'remote')
+        ? unique.filter(j => isLocationMatch(j.location, configuredLoc))
+        : unique;
       // Score each job
-      unique.forEach(j => {
+      locationFiltered.forEach(j => {
         const { score, resumeId } = bestResumeFor(j);
         j.score = score; j.bestResumeId = resumeId;
       });
       // Sort: score desc → date desc
-      unique.sort((a,b) => b.score - a.score || new Date(b.postedAt) - new Date(a.postedAt));
+      locationFiltered.sort((a,b) => b.score - a.score || new Date(b.postedAt) - new Date(a.postedAt));
 
-      APP.jobs = unique;
+      APP.jobs = locationFiltered;
       persistJobs();
       showView('dashboard');
       renderDashboard();
-      showToast(unique.length
-        ? `Found ${unique.length} fresh job${unique.length!==1?'s':''}!`
-        : 'No jobs posted in the last 24 h. Try adding more keywords in Settings.');
+      showToast(locationFiltered.length
+        ? `Found ${locationFiltered.length} fresh job${locationFiltered.length!==1?'s':''}!`
+        : 'No jobs posted in the last 24 h matching your location. Try widening Settings.');
     } catch(e) {
       showToast('Fetch error — check your connection.');
       console.error(e);
@@ -2011,9 +2060,21 @@ TAILORED RESUME:`;
     document.getElementById('pin-screen').classList.add('hidden');
   }
 
+  /* ── Re-score all cached jobs with the latest algorithm ── */
+  function rescoreCachedJobs() {
+    if (APP.jobs.length === 0 || APP.resumes.length === 0) return;
+    APP.jobs.forEach(j => {
+      const { score, resumeId } = bestResumeFor(j);
+      j.score = score; j.bestResumeId = resumeId;
+    });
+    APP.jobs.sort((a,b) => b.score - a.score || new Date(b.postedAt) - new Date(a.postedAt));
+    persistJobs();
+  }
+
   /* ── Init ── */
   function init() {
     loadPersistedState();
+    rescoreCachedJobs(); // apply latest scoring to any stale cached results
 
     // Show PIN screen if one is set
     const pinHash = localStorage.getItem('ff_pin_hash');
