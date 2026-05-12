@@ -1487,22 +1487,27 @@
     const coreScore = uniScore * 0.4 + biScore * 0.6;
 
     // ── 2. Requirements/qualifications match (30 pts) ──
-    // Prefer the requirements section so company boilerplate, duties, and
-    // benefits don't dilute the score. Fall back to high-frequency desc words.
-    const reqText = extractRequirementsSection(job.description || '');
+    // Check whether the description contains a requirements section header.
+    // We test the raw description (not the extracted slice) so that descriptions
+    // starting at index 0 with "Requirements:" are handled correctly.
+    const REQ_HDR = /\b(requirements?|qualifications?|you (should|must|will) have|skills? (needed|required)|minimum qualifications?|preferred qualifications?|about you|what you bring|your background|your profile)\b/i;
+    const desc    = job.description || '';
     let reqScore  = 0;
-    if (reqText !== (job.description || '') && reqText.length > 120) {
-      const reqKws = extractKeywords(reqText);
+    if (REQ_HDR.test(desc)) {
+      // Found a clear requirements section — score all its keywords
+      const reqText = extractRequirementsSection(desc);
+      const reqKws  = extractKeywords(reqText);
       reqScore = reqKws.size > 0
         ? [...reqKws].filter(k => resumeKws.has(k)).length / reqKws.size : 0;
     } else {
-      const dWords = (job.description || '').toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+      // No section header — use words that repeat 2+ times as proxy for requirements.
+      // Require at least 3 such terms to guard against short/generic descriptions.
+      const dWords = desc.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
         .filter(w => w.length >= 3 && !STOP_WORDS.has(w));
       const freq = {};
       dWords.forEach(w => { freq[w] = (freq[w]||0) + 1; });
       const freqKws = Object.keys(freq).filter(w => freq[w] >= 2);
-      reqScore = freqKws.length > 0
+      reqScore = freqKws.length >= 3
         ? freqKws.filter(w => resumeKws.has(w)).length / freqKws.length : 0;
     }
 
