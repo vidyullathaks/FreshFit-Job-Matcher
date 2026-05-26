@@ -44,6 +44,14 @@
     .score-moderate{ color: #b45309; background: #fffbeb; border-color: #fde68a; }
     .score-low     { color: #475569; background: #f8fafc; border-color: #e2e8f0; }
 
+    /* ── Mobile bottom nav ── */
+    .mob-nav-btn { display:flex; flex-direction:column; align-items:center; gap:2px;
+                   flex:1; padding:8px 4px; color:#94a3b8; font-size:10px;
+                   background:transparent; border:none; cursor:pointer; transition:color .15s; }
+    .mob-nav-btn:hover  { color:#fff; }
+    .mob-nav-btn.active { color:#2dd4bf; }
+    .mob-nav-btn svg    { width:20px; height:20px; }
+
     /* ── Modal visible ── */
     #modal-backdrop.open { display: flex; }
 
@@ -98,12 +106,12 @@
       <div class="flex items-center gap-3">
         <span id="last-updated" class="text-xs text-slate-400 hidden md:block"></span>
         <button id="btn-fetch" onclick="fetchJobs()"
-          class="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
-          <svg id="fetch-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          class="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold px-3 md:px-4 py-2 rounded-lg transition-colors">
+          <svg id="fetch-icon" class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
           </svg>
-          Find Jobs
+          <span class="hidden sm:inline">Find Jobs</span>
         </button>
       </div>
     </div>
@@ -112,7 +120,7 @@
   <!-- ═══════════════════════════════════════════
        MAIN — VIEW CONTAINERS
   ═══════════════════════════════════════════ -->
-  <main class="max-w-7xl mx-auto px-4 py-6">
+  <main class="max-w-7xl mx-auto px-4 py-6 pb-24 md:pb-6">
 
     <!-- ── SETUP VIEW (no resumes yet) ── -->
     <div id="view-setup" class="hidden">
@@ -155,6 +163,50 @@
       </div>
     </div>
 
+    <!-- ── ONBOARDING VIEW (after first resume, before first fetch) ── -->
+    <div id="view-onboarding" class="hidden">
+      <div class="max-w-lg mx-auto mt-8 px-2">
+        <div class="text-center mb-8">
+          <div class="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </div>
+          <h2 class="text-2xl font-bold text-slate-900 mb-2">One last step</h2>
+          <p class="text-slate-500">Tell us what you're looking for so we find the right matches.</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+          <div>
+            <label class="block text-sm font-semibold mb-1">
+              What roles are you looking for?
+              <span class="text-red-400 ml-0.5">*</span>
+            </label>
+            <input id="ob-job-titles" type="text"
+              placeholder="e.g. Product Manager, Senior PM, Head of Product"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            <p class="text-xs text-slate-400 mt-1.5">Comma-separated. This drives both the job search and the fit scoring.</p>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold mb-1">Preferred location</label>
+            <input id="ob-location" type="text"
+              placeholder="e.g. United States, Remote, United Kingdom"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            <p class="text-xs text-slate-400 mt-1.5">Jobs from other countries will be filtered out automatically. Leave blank for worldwide.</p>
+          </div>
+          <button onclick="finishOnboarding()"
+            class="w-full bg-teal-500 hover:bg-teal-600 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 text-base">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            Find My Jobs
+          </button>
+        </div>
+        <p class="text-center text-xs text-slate-400 mt-4">You can change these anytime in Settings.</p>
+      </div>
+    </div>
+
     <!-- ── DASHBOARD VIEW ── -->
     <div id="view-dashboard" class="hidden">
       <!-- Filter bar -->
@@ -181,16 +233,8 @@
       </div>
       <!-- Jobs grid -->
       <div id="jobs-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
-      <!-- Empty state -->
-      <div id="jobs-empty" class="hidden text-center py-20">
-        <div class="text-6xl mb-4">🔍</div>
-        <h3 class="text-xl font-semibold text-slate-700 mb-2">No jobs found yet</h3>
-        <p class="text-slate-500 mb-6">Click "Find Jobs" to pull fresh postings from the last 24 hours.</p>
-        <button onclick="fetchJobs()"
-          class="bg-teal-500 hover:bg-teal-600 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
-          Find Fresh Jobs
-        </button>
-      </div>
+      <!-- Empty state — content injected by renderEmptyState() -->
+      <div id="jobs-empty" class="hidden text-center py-16"></div>
     </div>
 
     <!-- ── RESUMES VIEW ── -->
@@ -233,7 +277,7 @@
           <div class="space-y-4">
             <div>
               <label class="block text-sm font-medium mb-1">Job Titles / Keywords <span class="text-slate-400 font-normal">(comma-separated)</span></label>
-              <input id="s-job-titles" type="text" placeholder="Software Engineer, Frontend Developer, React Developer"
+              <input id="s-job-titles" type="text" placeholder="e.g. Product Manager, Senior PM — or — Software Engineer, React Developer"
                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
             </div>
             <div>
@@ -375,6 +419,42 @@
     </div>
 
   </main><!-- end main -->
+
+  <!-- ═══════════════════════════════════════════
+       MOBILE BOTTOM NAV (hidden on md+)
+  ═══════════════════════════════════════════ -->
+  <nav id="mob-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-700 z-40 flex">
+    <button id="mob-nav-dashboard" class="mob-nav-btn" onclick="showView('dashboard')">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+          d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+      Jobs
+    </button>
+    <button id="mob-nav-fetch" class="mob-nav-btn" onclick="fetchJobs()" style="color:#2dd4bf">
+      <svg id="mob-fetch-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      Find
+    </button>
+    <button id="mob-nav-resumes" class="mob-nav-btn" onclick="showView('resumes')">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+      Resumes
+    </button>
+    <button id="mob-nav-settings" class="mob-nav-btn" onclick="showView('settings')">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      Settings
+    </button>
+  </nav>
 
   <!-- ═══════════════════════════════════════════
        MODAL BACKDROP + MODALS
@@ -624,8 +704,8 @@
     apifyLinkedInActor:   'hireforce~linkedin-jobs-scraper',
     targetCompanies:      '',
     careerCountry:   'us',
-    jobTitles:       'Software Engineer, Frontend Developer',
-    location:        'Remote',
+    jobTitles:       '',
+    location:        '',
   };
 
   const POPULAR_COMPANIES = [
@@ -783,9 +863,8 @@
     closeModal();
 
     if (APP.resumes.length === 1) {
-      // First resume — kick off a job fetch right away
-      showView('dashboard');
-      fetchJobs();
+      // First resume — go to onboarding to collect job titles before fetching
+      showView('onboarding');
     } else {
       renderResumesView();
       showToast('Resume saved!');
@@ -826,9 +905,20 @@
         document.getElementById('resume-name').value =
           file.name.replace(/\.(pdf|txt|doc|docx)$/i, '').replace(/[-_]/g, ' ');
       }
-      const lineCount = text.split('\n').filter(l => l.trim()).length;
-      st.textContent = `✓ Parsed ${lineCount} lines from "${file.name}"`;
-      st.className = 'text-sm text-teal-600';
+      const lines      = text.split('\n').filter(l => l.trim());
+      const lineCount  = lines.length;
+      const avgLen     = lines.reduce((s,l)=>s+l.length,0) / (lineCount||1);
+      const weirdRatio = (text.match(/[^\x20-\x7E\n\r\t]/g)||[]).length / (text.length||1);
+      const looksGarbled = file.name.toLowerCase().endsWith('.pdf')
+        && (lineCount < 8 || avgLen > 150 || weirdRatio > 0.04);
+
+      if (looksGarbled) {
+        st.innerHTML = `⚠️ Only ${lineCount} lines extracted — your PDF may have complex formatting. <strong>Please review the text below</strong> and paste your resume manually if it looks wrong.`;
+        st.className = 'text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2';
+      } else {
+        st.textContent = `✓ Parsed ${lineCount} lines from "${file.name}"`;
+        st.className = 'text-sm text-teal-600';
+      }
       document.getElementById('upload-area').classList.add('border-teal-400','bg-teal-50/50');
     } catch (err) {
       st.textContent = 'Could not parse the file. Try pasting the text directly.';
@@ -1408,6 +1498,7 @@
     const icon = document.getElementById('fetch-icon');
     btn.disabled = true; btn.classList.add('opacity-70');
     icon.classList.add('animate-spin');
+    document.getElementById('mob-fetch-icon')?.classList.add('animate-spin');
     showToast('Searching fresh jobs from the last 24 hours…', 4000);
 
     try {
@@ -1455,6 +1546,7 @@
     } finally {
       btn.disabled = false; btn.classList.remove('opacity-70');
       icon.classList.remove('animate-spin');
+      document.getElementById('mob-fetch-icon')?.classList.remove('animate-spin');
     }
   }
 
@@ -1618,6 +1710,7 @@
 
     if (jobs.length === 0) {
       grid.innerHTML = '';
+      renderEmptyState();
       empty.classList.remove('hidden');
       return;
     }
@@ -1966,23 +2059,37 @@ TAILORED RESUME:`;
 
   /* ── Navigation ── */
   function showView(name) {
-    // If no resumes yet, always land on setup
-    const target = (APP.resumes.length === 0 && name === 'dashboard') ? 'setup' : name;
+    // Guard: no resumes → setup; resumes but no job titles → onboarding
+    let target = name;
+    if (APP.resumes.length === 0) {
+      target = 'setup';
+    } else if (name === 'dashboard' && !APP.settings.jobTitles.trim()) {
+      target = 'onboarding';
+    }
     APP.currentView = target;
 
-    ['setup','dashboard','resumes','settings'].forEach(v => {
+    ['setup','onboarding','dashboard','resumes','settings'].forEach(v => {
       document.getElementById(`view-${v}`)?.classList.add('hidden');
     });
     document.getElementById(`view-${target}`)?.classList.remove('hidden');
 
-    // Nav highlight
+    // Desktop nav highlight
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    const activeId = target === 'setup' ? 'nav-dashboard' : `nav-${target}`;
-    document.getElementById(activeId)?.classList.add('active');
+    const desktopActive = (target === 'setup' || target === 'onboarding') ? 'nav-dashboard' : `nav-${target}`;
+    document.getElementById(desktopActive)?.classList.add('active');
+
+    // Mobile nav highlight
+    document.querySelectorAll('.mob-nav-btn').forEach(b => b.classList.remove('active'));
+    const mobActive = (target === 'setup' || target === 'onboarding') ? 'mob-nav-dashboard' : `mob-nav-${target}`;
+    document.getElementById(mobActive)?.classList.add('active');
+
+    // Hide mobile nav on setup/onboarding (user hasn't configured yet)
+    const mobNav = document.getElementById('mob-nav');
+    if (mobNav) mobNav.style.display = (target === 'setup' || target === 'onboarding') ? 'none' : '';
 
     // Side effects
-    if (target === 'resumes')  renderResumesView();
-    if (target === 'settings') populateSettingsForm();
+    if (target === 'resumes')   renderResumesView();
+    if (target === 'settings')  populateSettingsForm();
     if (target === 'dashboard') renderDashboard();
   }
 
@@ -2060,6 +2167,72 @@ TAILORED RESUME:`;
     document.getElementById('pin-screen').classList.add('hidden');
   }
 
+  /* ── Onboarding: save titles/location then start fetch ── */
+  function finishOnboarding() {
+    const titles = (document.getElementById('ob-job-titles')?.value || '').trim();
+    if (!titles) {
+      showToast('Enter at least one job title to continue.');
+      document.getElementById('ob-job-titles')?.focus();
+      return;
+    }
+    APP.settings.jobTitles = titles;
+    APP.settings.location  = (document.getElementById('ob-location')?.value || '').trim();
+    persistSettings();
+    populateSettingsForm();
+    fetchJobs();
+  }
+
+  /* ── Dynamic empty state — explains WHY no jobs and what to do ── */
+  function renderEmptyState() {
+    const el = document.getElementById('jobs-empty');
+    if (!el) return;
+    const hasApify  = !!APP.settings.apifyApiKey;
+    const hasGroq   = !!APP.settings.groqApiKey;
+    const hasTitle  = !!APP.settings.jobTitles.trim();
+    const noFetch   = APP.jobs.length === 0 && !localStorage.getItem(SK.LAST_FETCH);
+
+    const tips = [];
+    if (!hasTitle)
+      tips.push({ icon:'🎯', msg:'Set your job titles in Settings — this is required for searching.', cta:'Open Settings', fn:"showView('settings')" });
+    if (!hasApify)
+      tips.push({ icon:'💼', msg:'Add a free Apify key to unlock LinkedIn jobs (biggest source).', cta:'Add in Settings', fn:"showView('settings')" });
+    if (!hasGroq)
+      tips.push({ icon:'✨', msg:'Add a free Groq key to enable AI resume tailoring.', cta:'Add in Settings', fn:"showView('settings')" });
+
+    const tipsHtml = tips.length ? `
+      <div class="max-w-sm mx-auto space-y-2 mb-6 text-left">
+        ${tips.map(t => `
+          <div class="flex items-start gap-3 bg-white rounded-xl border border-slate-200 px-4 py-3 shadow-sm">
+            <span class="text-xl mt-0.5">${t.icon}</span>
+            <div class="flex-1 text-sm text-slate-600">${t.msg}</div>
+            <button onclick="${t.fn}" class="text-xs text-teal-600 font-semibold hover:underline shrink-0 mt-0.5">${t.cta} →</button>
+          </div>`).join('')}
+      </div>` : '';
+
+    const headline = noFetch ? 'No jobs fetched yet'
+      : !hasTitle              ? 'Set a job title first'
+      : 'No matching jobs right now';
+    const subtext  = noFetch ? 'Click "Find Jobs" to pull fresh postings from the last 24 hours.'
+      : !hasTitle              ? 'Add your target role in Settings so the search knows what to look for.'
+      : 'The free APIs may have few postings right now. Try again tomorrow, or add Apify to get LinkedIn jobs.';
+
+    el.innerHTML = `
+      <div class="text-5xl mb-4">🔍</div>
+      <h3 class="text-xl font-semibold text-slate-700 mb-2">${headline}</h3>
+      <p class="text-slate-500 mb-6 max-w-sm mx-auto text-sm leading-relaxed">${subtext}</p>
+      ${tipsHtml}
+      <div class="flex flex-col sm:flex-row gap-3 justify-center">
+        <button onclick="fetchJobs()"
+          class="bg-teal-500 hover:bg-teal-600 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
+          Try Again
+        </button>
+        <button onclick="showView('settings')"
+          class="border border-slate-200 text-slate-600 font-medium px-6 py-2.5 rounded-lg hover:bg-slate-50 transition-colors">
+          Open Settings
+        </button>
+      </div>`;
+  }
+
   /* ── Re-score all cached jobs with the latest algorithm ── */
   function rescoreCachedJobs() {
     if (APP.jobs.length === 0 || APP.resumes.length === 0) return;
@@ -2086,6 +2259,8 @@ TAILORED RESUME:`;
 
     if (APP.resumes.length === 0) {
       showView('setup');
+    } else if (!APP.settings.jobTitles.trim()) {
+      showView('onboarding');
     } else {
       showView('dashboard');
       if (APP.jobs.length === 0) fetchJobs();
@@ -2096,6 +2271,7 @@ TAILORED RESUME:`;
   function hidePinScreen() {
     document.getElementById('pin-screen').classList.add('hidden');
     if (APP.resumes.length === 0) showView('setup');
+    else if (!APP.settings.jobTitles.trim()) showView('onboarding');
     else { showView('dashboard'); if (APP.jobs.length === 0) fetchJobs(); }
   }
 
