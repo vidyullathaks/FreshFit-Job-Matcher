@@ -781,7 +781,7 @@
     /^(SUMMARY|PROFESSIONAL SUMMARY|OBJECTIVE|CAREER OBJECTIVE|PROFILE|ABOUT ME|OVERVIEW)/i,
     /^(EXPERIENCE|WORK EXPERIENCE|PROFESSIONAL EXPERIENCE|EMPLOYMENT HISTORY|WORK HISTORY|EMPLOYMENT)/i,
     /^(EDUCATION|ACADEMIC|QUALIFICATIONS|ACADEMIC BACKGROUND)/i,
-    /^(SKILLS|TECHNICAL SKILLS|CORE COMPETENCIES|KEY SKILLS|TECHNOLOGIES|TECH STACK|EXPERTISE)/i,
+    /^(SKILLS|TECHNICAL SKILLS|CORE SKILLS|CORE COMPETENCIES|KEY SKILLS|TECHNOLOGIES|TECH STACK|EXPERTISE|AREAS OF EXPERTISE|COMPETENCIES)/i,
     /^(PROJECTS|PERSONAL PROJECTS|KEY PROJECTS|NOTABLE PROJECTS|PORTFOLIO)/i,
     /^(CERTIFICATIONS?|CERTIFICATES?|LICENSES?|ACCREDITATIONS?)/i,
     /^(PUBLICATIONS?|RESEARCH|PAPERS?)/i,
@@ -1070,6 +1070,10 @@
   async function fetchArbeitnow() {
     const titles = (APP.settings.jobTitles || 'software engineer')
       .split(',').map(t => t.trim().toLowerCase());
+    const loc = (APP.settings.location || '').toLowerCase();
+    // Arbeitnow is a European board — skip on-site jobs when user wants a non-EU location
+    const nonEuLocation = loc && !/\b(germany|europe|deutschland|austria|switzerland|netherlands|belgium|france|spain|italy|poland|sweden|norway|denmark|finland|portugal|czech|remote)\b/.test(loc);
+
     try {
       const res  = await fetch('https://www.arbeitnow.com/api/job-board-api');
       const data = await res.json();
@@ -1077,16 +1081,21 @@
       return data.data
         .filter(j => {
           if (!isWithin12h(j.created_at)) return false;
+          // When user wants non-EU location, only include explicitly remote Arbeitnow jobs
+          if (nonEuLocation && !j.remote) return false;
           const t = (j.title||'').toLowerCase();
-          return titles.some(kw =>
-            kw.toLowerCase().split(/\s+/).filter(w => w.length >= 4)
-              .some(w => t.includes(w))
-          );
+          // Require ALL words of each keyword phrase to appear in the title (not just any one word)
+          return titles.some(kw => {
+            const kwLower = kw.toLowerCase();
+            if (t.includes(kwLower)) return true; // exact phrase match first
+            const words = kwLower.split(/\s+/).filter(w => w.length >= 3);
+            return words.length > 0 && words.every(w => t.includes(w));
+          });
         })
         .slice(0, 40)
         .map(j => mkJob({
           id: 'arb_' + j.slug, title: j.title, company: j.company_name,
-          location: j.location || (j.remote ? 'Remote' : 'On-site'),
+          location: j.remote ? 'Remote' : (j.location || 'On-site'),
           url: j.url, salary: '',
           description: stripHtml(j.description),
           postedAt: new Date(j.created_at * 1000).toISOString(),
@@ -1456,11 +1465,13 @@
     if (!j || /\b(remote|worldwide|anywhere|global)\b/.test(j)) return true;
 
     // ── US ──
-    if (/\b(united states|u\.?s\.?a?\.?|america)\b/.test(c)) {
+    if (/\b(united states|u\.?s\.?a?\.?|america)\b/.test(c) || c === 'remote, united states' || c === 'united states, remote') {
       if (/\b(united states|u\.?s\.?a?\.?|america)\b/.test(j)) return true;
-      if (/\b(new york|san francisco|los angeles|chicago|seattle|boston|austin|denver|atlanta|miami|dallas|houston|phoenix|philadelphia|portland|minneapolis|san jose|washington|baltimore|las vegas|sacramento|nashville|raleigh|charlotte|columbus|indianapolis|detroit|new jersey|brooklyn|manhattan)\b/i.test(j)) return true;
+      if (/\b(new york|san francisco|los angeles|chicago|seattle|boston|austin|denver|atlanta|miami|dallas|houston|phoenix|philadelphia|portland|minneapolis|san jose|washington|baltimore|las vegas|sacramento|nashville|raleigh|charlotte|columbus|indianapolis|detroit|new jersey|brooklyn|manhattan|san diego|salt lake|pittsburgh|richmond|tampa|orlando|kansas city|st\.? louis|new orleans|hartford|providence|buffalo|rochester|albany)\b/i.test(j)) return true;
       if (/,\s*(al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy)(\b|$)/i.test(j)) return true;
-      if (/\b(germany|deutschland|france|spain|italy|india|china|brazil|australia|canada|mexico|netherlands|belgium|sweden|norway|denmark|finland|austria|switzerland|poland|portugal|czech|romania|hungary|ukraine|russia|japan|south korea|singapore|hong kong|new zealand|south africa|argentina|colombia|chile|united kingdom|britain|england|ireland|scotland|turkey|israel|uae|dubai|saudi|vietnam|thailand|philippines|indonesia|malaysia|taiwan|berlin|munich|hamburg|amsterdam|rotterdam|london|paris|madrid|barcelona|rome|milan|tokyo|seoul|bangalore|mumbai|delhi|hyderabad|toronto|montreal|vancouver|sydney|melbourne|cape town)\b/i.test(j)) return false;
+      // Reject known non-US countries AND common non-US cities (esp. German cities from Arbeitnow)
+      if (/\b(germany|deutschland|france|spain|italy|india|china|brazil|australia|canada|mexico|netherlands|belgium|sweden|norway|denmark|finland|austria|switzerland|poland|portugal|czech|romania|hungary|ukraine|russia|japan|south korea|singapore|hong kong|new zealand|south africa|argentina|colombia|chile|united kingdom|britain|england|ireland|scotland|turkey|israel|uae|dubai|saudi|vietnam|thailand|philippines|indonesia|malaysia|taiwan)\b/i.test(j)) return false;
+      if (/\b(berlin|munich|münchen|hamburg|frankfurt|cologne|köln|düsseldorf|dusseldorf|stuttgart|dortmund|essen|hannover|leipzig|dresden|bremen|nuremberg|nürnberg|mannheim|neuss|stuhr|bocholt|mülheim|mulheim|bonn|wiesbaden|bielefeld|karlsruhe|augsburg|münster|munster|amsterdam|rotterdam|eindhoven|utrecht|antwerp|brussels|bruxelles|zurich|zürich|geneva|bern|vienna|wien|warsaw|krakow|prague|budapest|bucharest|stockholm|oslo|copenhagen|helsinki|lisbon|athens|milan|rome|turin|naples|london|manchester|birmingham|edinburgh|glasgow|bristol|paris|lyon|marseille|toulouse|barcelona|madrid|dublin|toronto|montreal|vancouver|sydney|melbourne|bangalore|mumbai|delhi|hyderabad|chennai|tokyo|seoul|singapore|hong kong|cape town|dubai|abu dhabi)\b/i.test(j)) return false;
       return true; // no clear non-US country — include
     }
 
@@ -1971,6 +1982,19 @@ TAILORED RESUME:`;
     const lines      = APP.tailoredText.split('\n');
     let   firstNonEmpty = true;
 
+    // Convert URLs in escaped text to clickable links
+    function linkify(escaped) {
+      return escaped.replace(/https?:\/\/[\w\-.~:/?#[\]@!$&'()*+,;=%]+/g, url =>
+        `<a href="${url.replace(/&amp;/g,'&')}" target="_blank"
+            style="color:#0d9488;text-decoration:underline">${url}</a>`
+      );
+    }
+
+    // Detect "Left text    Month YYYY – Month YYYY/Present" — render with right-aligned date
+    const DATE_RIGHT = /^(.+?)\s{2,}((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s*[-–]\s*(?:Present|Current|Now|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}))$/i;
+    // Also catch single-year or "Month YYYY – Present" appended directly without extra spaces
+    const DATE_INLINE = /^(.{10,}?)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s*[-–]\s*(?:Present|Current|Now|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}))$/i;
+
     const htmlLines = lines.map(raw => {
       const line = raw.trim();
       if (!line) return '<div style="margin:0.18em 0"></div>';
@@ -1981,15 +2005,15 @@ TAILORED RESUME:`;
         return `<div style="font-size:18pt;font-weight:800;letter-spacing:0.01em;color:#0f172a;margin-bottom:0.1em">${esc(line)}</div>`;
       }
 
-      // Detect contact / header line (contains @ or | or http or phone pattern)
-      if (/@|https?:|linkedin\.com|\||\(\d{3}\)/.test(line) && line.length < 180) {
-        return `<div style="font-size:9pt;color:#475569;margin-bottom:0.35em">${esc(line)}</div>`;
+      // Detect contact / header line (contains @ or | or http or phone pattern) — linkify URLs
+      if (/@|https?:|linkedin\.com|\||\(\d{3}\)/.test(line) && line.length < 200) {
+        return `<div style="font-size:9pt;color:#475569;margin-bottom:0.35em">${linkify(esc(line))}</div>`;
       }
 
       // Detect section header
       const isHeader =
-        /^[A-Z][A-Z\s&\/\-]{3,}$/.test(line) ||        // ALL-CAPS line
-        sectionSet.has(line.toLowerCase().slice(0,12)) || // matches known section
+        /^[A-Z][A-Z\s&\/\-]{3,}$/.test(line) ||
+        sectionSet.has(line.toLowerCase().slice(0,12)) ||
         SECTION_PATTERNS.some(p => p.test(line));
 
       if (isHeader && line.length < 60) {
@@ -2002,7 +2026,16 @@ TAILORED RESUME:`;
           <span style="position:absolute;left:-0.9em">•</span>${esc(line.replace(/^[-•·▸▪*]\s/,''))}</div>`;
       }
 
-      // Default line (job title, company, date rows, etc.)
+      // Right-aligned date — "Role / Company    Month YYYY – Month YYYY"
+      const dm = line.match(DATE_RIGHT) || line.match(DATE_INLINE);
+      if (dm) {
+        return `<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:9.5pt;color:#1e293b;margin-top:0.1em;gap:8px">
+          <span>${esc(dm[1].trim())}</span>
+          <span style="color:#475569;font-size:9pt;white-space:nowrap;flex-shrink:0">${esc(dm[2].trim())}</span>
+        </div>`;
+      }
+
+      // Default line
       return `<div style="font-size:9.5pt;line-height:1.4;color:#1e293b;margin-top:0.07em">${esc(line)}</div>`;
     }).join('');
 
