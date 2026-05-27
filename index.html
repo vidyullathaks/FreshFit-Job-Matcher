@@ -341,14 +341,13 @@
             <label class="block text-sm font-medium mb-1">LinkedIn Scraper Actor ID
               <span class="text-slate-400 font-normal ml-1">— find working actors at apify.com/store → search "linkedin jobs"</span>
             </label>
-            <input id="s-linkedin-actor" type="text" placeholder="hireforce~linkedin-jobs-scraper"
+            <input id="s-linkedin-actor" type="text" placeholder="cryptosignals~linkedin-jobs-scraper"
               class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
             <p class="text-xs text-slate-400 mt-1">
               The app automatically tries
-              <code class="bg-slate-100 px-1 rounded">hireforce~linkedin-jobs-scraper</code>,
-              <code class="bg-slate-100 px-1 rounded">curious_coder~linkedin-job-scraper</code>, and
-              <code class="bg-slate-100 px-1 rounded">anchor~linkedin-jobs-scraper</code> as fallbacks.
-              If all fail, search <a href="https://apify.com/store?search=linkedin+jobs" target="_blank" class="underline text-teal-600">apify.com/store</a> for a working actor and paste its ID here.
+              <code class="bg-slate-100 px-1 rounded">cryptosignals~linkedin-jobs-scraper</code> and
+              <code class="bg-slate-100 px-1 rounded">curious_coder~linkedin-jobs-scraper</code> as fallbacks.
+              If both fail, search <a href="https://apify.com/store?search=linkedin+jobs" target="_blank" class="underline text-teal-600">apify.com/store</a> for a working actor and paste its ID here.
             </p>
           </div>
           <p id="apify-credit-warning" class="hidden mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -701,7 +700,7 @@
     adzunaAppKey:    '',
     adzunaCountry:   'us',
     apifyApiKey:          '',
-    apifyLinkedInActor:   'hireforce~linkedin-jobs-scraper',
+    apifyLinkedInActor:   'cryptosignals~linkedin-jobs-scraper',
     targetCompanies:      '',
     careerCountry:   'us',
     jobTitles:       '',
@@ -983,7 +982,7 @@
   function populateSettingsForm() {
     const s = APP.settings;
     document.getElementById('s-apify-key').value        = s.apifyApiKey          || '';
-    document.getElementById('s-linkedin-actor').value   = s.apifyLinkedInActor  || 'hireforce~linkedin-jobs-scraper';
+    document.getElementById('s-linkedin-actor').value   = s.apifyLinkedInActor  || 'cryptosignals~linkedin-jobs-scraper';
     document.getElementById('s-groq-key').value         = s.groqApiKey           || '';
     document.getElementById('s-target-companies').value = s.targetCompanies  || '';
     document.getElementById('s-career-country').value   = s.careerCountry    || 'us';
@@ -998,7 +997,7 @@
   function saveSettings() {
     APP.settings = {
       apifyApiKey:         document.getElementById('s-apify-key').value.trim(),
-      apifyLinkedInActor:  document.getElementById('s-linkedin-actor').value.trim() || 'hireforce~linkedin-jobs-scraper',
+      apifyLinkedInActor:  document.getElementById('s-linkedin-actor').value.trim() || 'cryptosignals~linkedin-jobs-scraper',
       groqApiKey:          document.getElementById('s-groq-key').value.trim(),
       targetCompanies: document.getElementById('s-target-companies').value.trim(),
       careerCountry:   document.getElementById('s-career-country').value,
@@ -1198,13 +1197,11 @@
 
   /* ── Apify / LinkedIn ── */
 
-  // Known actors tried in order. 404 = actor not found → try next immediately.
-  // Any other error (timeout, 4xx, 5xx) = stop and show the real error message.
+  // Known working actors tried in order. 404 = actor gone → skip to next.
+  // Verified live May 2026: cryptosignals completes in <90s (fast); curious_coder is slow (~9 min).
   const LINKEDIN_ACTORS = [
-    'hireforce~linkedin-jobs-scraper',
-    'curious_coder~linkedin-job-scraper',
-    'anchor~linkedin-jobs-scraper',
-    'bebity~linkedin-jobs-scraper',
+    'cryptosignals~linkedin-jobs-scraper',
+    'curious_coder~linkedin-jobs-scraper',
   ];
 
   const APIFY_ERRORS = {
@@ -1229,7 +1226,7 @@
       const p = new URLSearchParams({ keywords: title, f_TPR: 'r86400' });
       if (location && !location.toLowerCase().includes('remote')) p.set('location', location);
       else p.set('f_WT', '2'); // remote work filter
-      return { url: `https://www.linkedin.com/jobs/search/?${p}` };
+      return `https://www.linkedin.com/jobs/search/?${p}`;
     });
 
     // Also send keyword fields — some actors ignore startUrls and prefer these
@@ -1240,14 +1237,21 @@
     }));
 
     const body = {
-      startUrls,
-      searchQueries,
+      // cryptosignals and similar actors use direct keyword/location fields
+      keyword:       titles[0] || '',
+      keywords:      titles[0] || '',
       searchKeywords: titles[0] || '',
       location,
-      datePosted:      'Past 24 hours',
-      maxItems:        40,
-      maxResults:      40,
-      scrapeJobDetails: true,
+      datePosted:    'Past 24 hours',
+      remote:        location.toLowerCase().includes('remote'),
+      // curious_coder expects plain string URLs in 'urls'
+      urls:          startUrls,
+      // Most other actors use startUrls with objects
+      startUrls:     startUrls.map(u => ({ url: u })),
+      searchQueries,
+      maxItems:      40,
+      maxResults:    40,
+      scrapeJobDetails: false,
       scrapeCompany:    false,
     };
 
@@ -1286,7 +1290,8 @@
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         const msg = errBody?.error?.message || '';
-        if (res.status === 408 || msg.toLowerCase().includes('timeout')) {
+        const isTimeout = res.status === 408 || /timeout|timed.out/i.test(msg);
+        if (isTimeout) {
           showToast(APIFY_ERRORS.timeout, 5000);
         } else {
           showToast(`LinkedIn (Apify) actor "${actor}" — error ${res.status}${msg ? ': ' + msg : ''}. Try a different actor in Settings.`, 8000);
@@ -1303,21 +1308,31 @@
       return data
         .filter(j => j && j.title)
         .filter(j => {
+          // Trust LinkedIn's own f_TPR=r86400 filter for recency; only hard-reject
+          // clearly old ISO dates (>7 days). postedDate (YYYY-MM-DD) is skipped
+          // because LinkedIn recirculates older listings in "past 24h" results.
           const raw = j.postedAt || j.datePosted || j.publishedAt || '';
           if (!raw) return true;
-          return isWithin12h(raw);
+          // Skip date-only strings (YYYY-MM-DD) — trust LinkedIn's own filter
+          if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return true;
+          const d = new Date(raw);
+          if (isNaN(d.getTime())) return true;
+          const days = (Date.now() - d.getTime()) / 86_400_000;
+          return days >= 0 && days <= 7; // accept up to 7 days for LinkedIn
         })
         .map(j => mkJob({
           id:          'li_' + (j.id || j.jobId || Math.random().toString(36).slice(2)),
           title:       j.title,
           company:     j.companyName || j.company || '',
           location:    j.location    || '',
-          url:         j.jobUrl      || j.url || '',
+          url:         j.jobUrl || j.applyUrl || j.link || j.url || '',
           salary:      j.salary      || j.salaryRange || '',
-          description: stripHtml(j.description || j.descriptionHtml || ''),
-          postedAt:    j.postedAt    || j.datePosted || new Date().toISOString(),
+          description: j.descriptionText || stripHtml(j.description || j.descriptionHtml || ''),
+          postedAt:    j.postedAt || j.datePosted || j.postedDate
+                       ? new Date(j.postedAt || j.datePosted || j.postedDate).toISOString()
+                       : new Date().toISOString(),
           source:      'LinkedIn',
-          tags:        j.skills      || [],
+          tags:        [...(j.skills || []), ...(j.workRemoteAllowed ? ['remote'] : [])],
         }));
     } // end for-loop
 
@@ -1625,13 +1640,20 @@
     // same core-role points as a plain "Product Manager" posting.
     const coreLower   = extractCoreRole(job.title);
     const coreWords   = coreLower.split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+    // Strip seniority prefixes before bigrams — "senior product manager" should
+    // produce the bigram "product manager", not "senior product".
+    const SENIORITY = new Set(['senior','junior','sr','jr','lead','principal','staff','associate','entry','mid']);
+    const coreForBigrams = coreWords.filter(w => !SENIORITY.has(w));
     const coreBigrams = [];
-    for (let i = 0; i < coreWords.length - 1; i++) {
-      if (coreWords[i].length >= 3 && coreWords[i+1].length >= 3)
-        coreBigrams.push(coreWords[i] + ' ' + coreWords[i+1]);
+    for (let i = 0; i < coreForBigrams.length - 1; i++) {
+      if (coreForBigrams[i].length >= 3 && coreForBigrams[i+1].length >= 3)
+        coreBigrams.push(coreForBigrams[i] + ' ' + coreForBigrams[i+1]);
     }
-    const uniScore = coreWords.length > 0
-      ? coreWords.filter(w => resumeKws.has(w)).length / coreWords.length : 0;
+    // Use role-only words (no seniority) for both uni and bi scoring —
+    // a PM resume should score high on "Senior PM" just as on "PM".
+    const roleWords = coreForBigrams.length > 0 ? coreForBigrams : coreWords;
+    const uniScore = roleWords.length > 0
+      ? roleWords.filter(w => resumeKws.has(w)).length / roleWords.length : 0;
     const biScore  = coreBigrams.length > 0
       ? coreBigrams.filter(b => resumeKws.has(b)).length / coreBigrams.length
       : uniScore;
